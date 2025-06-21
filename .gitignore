@@ -15,3 +15,19 @@ dist/
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Terraform files
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+!terraform.tfvars.example
+*.tfplan
+*.tflog
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+crash.log
+crash.*.log
