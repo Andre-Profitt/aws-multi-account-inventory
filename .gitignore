@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+venv/
+env/
+.venv/
+*.log
+.DS_Store
+config/accounts.json
+!config/accounts.json.example
+dist/
+*.zip
+.coverage
+htmlcov/
+.pytest_cache/
