@@ -1,0 +1,22 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Cross-account inventory collection role
+
+Parameters:
+  CentralAccountId:
+    Type: String
+    Description: Central inventory account ID
+
+Resources:
+  InventoryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: InventoryRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${CentralAccountId}:root'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess

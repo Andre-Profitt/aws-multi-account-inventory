@@ -1,0 +1,153 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Lambda function for AWS inventory collection
+
+Parameters:
+  DynamoDBTableName:
+    Type: String
+    Default: aws-inventory
+    Description: Name of the DynamoDB table for inventory storage
+  
+  ScheduleExpression:
+    Type: String
+    Default: rate(6 hours)
+    Description: Schedule expression for inventory collection
+  
+  LambdaTimeout:
+    Type: Number
+    Default: 300
+    Description: Lambda timeout in seconds
+  
+  LambdaMemory:
+    Type: Number
+    Default: 512
+    Description: Lambda memory in MB
+  
+  AccountsConfig:
+    Type: String
+    Default: '{}'
+    Description: JSON configuration for AWS accounts (optional)
+
+Resources:
+  # Lambda Execution Role
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-lambda-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: InventoryCollectionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoDBTableName}'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DynamoDBTableName}/index/*'
+              - Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                Resource: 'arn:aws:iam::*:role/InventoryRole'
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeRegions
+                Resource: '*'
+
+  # Lambda Function
+  InventoryCollectorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-collector'
+      Runtime: python3.9
+      Handler: src.lambda.handler.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: !Ref LambdaTimeout
+      MemorySize: !Ref LambdaMemory
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref DynamoDBTableName
+          ACCOUNTS_CONFIG: !Ref AccountsConfig
+      Code:
+        ZipFile: |
+          import json
+          def lambda_handler(event, context):
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps('Placeholder - upload actual deployment package')
+              }
+
+  # CloudWatch Log Group
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${InventoryCollectorFunction}'
+      RetentionInDays: 14
+
+  # EventBridge Rule
+  ScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${AWS::StackName}-schedule'
+      Description: Trigger inventory collection
+      ScheduleExpression: !Ref ScheduleExpression
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt InventoryCollectorFunction.Arn
+          Id: LambdaTarget
+
+  # Permission for EventBridge
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref InventoryCollectorFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ScheduleRule.Arn
+
+Outputs:
+  LambdaFunctionName:
+    Description: Name of the Lambda function
+    Value: !Ref InventoryCollectorFunction
+    Export:
+      Name: !Sub '${AWS::StackName}-function-name'
+  
+  LambdaFunctionArn:
+    Description: ARN of the Lambda function
+    Value: !GetAtt InventoryCollectorFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-function-arn'
+  
+  LambdaRoleArn:
+    Description: ARN of the Lambda execution role
+    Value: !GetAtt LambdaExecutionRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-role-arn'
+  
+  ScheduleRuleName:
+    Description: Name of the EventBridge schedule rule
+    Value: !Ref ScheduleRule
+    Export:
+      Name: !Sub '${AWS::StackName}-schedule-rule'
+  
+  DeploymentInstructions:
+    Description: Next steps for deployment
+    Value: !Sub |
+      Lambda function created. To complete deployment:
+      1. Build deployment package: make build-lambda
+      2. Update function code: 
+         aws lambda update-function-code \
+           --function-name ${InventoryCollectorFunction} \
+           --zip-file fileb://lambda-deployment.zip

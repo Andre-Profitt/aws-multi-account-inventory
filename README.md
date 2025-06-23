@@ -88,8 +88,11 @@ terraform apply -var="central_account_id=YOUR_CENTRAL_ACCOUNT_ID"
 
 ### 4. Deploy Central Infrastructure
 
+You can deploy using either Terraform or CloudFormation:
+
+#### Using Terraform (Recommended)
 ```bash
-# Using Terraform
+# Using make
 make deploy
 
 # OR manually:
@@ -98,6 +101,16 @@ cp terraform.tfvars.example terraform.tfvars
 # Edit terraform.tfvars with your settings
 terraform init
 terraform apply
+```
+
+#### Using CloudFormation
+```bash
+# Deploy all infrastructure
+./scripts/deploy.sh all
+
+# OR deploy components separately:
+./scripts/deploy.sh central  # DynamoDB table
+./scripts/deploy.sh lambda   # Lambda function
 ```
 
 ### 5. Test the Deployment
@@ -127,8 +140,25 @@ make collect
 
 ### Query Inventory
 
+The project includes a comprehensive query tool for analyzing inventory data:
+
 ```bash
-# Query from DynamoDB
+# Show inventory summary
+python -m src.query.inventory_query --action summary
+
+# Get resources by account
+python -m src.query.inventory_query --action by-account --account-id 123456789012
+
+# Show recently discovered resources
+python -m src.query.inventory_query --action recent --hours 24
+
+# Export all data to JSON
+python -m src.query.inventory_query --action export --output inventory.json
+
+# Get details for a specific resource
+python -m src.query.inventory_query --action details --resource-id i-0123456789abcdef
+
+# Direct DynamoDB query
 aws dynamodb scan \
   --table-name aws-inventory \
   --query 'Items[*].{Type:resource_type.S,ID:resource_id.S,Account:account_name.S}'

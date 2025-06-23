@@ -9,7 +9,9 @@ help:
 	@echo "make deploy        - Deploy infrastructure with Terraform"
 	@echo "make deploy-iam    - Show IAM role deployment instructions"
 	@echo "make collect       - Run inventory collection locally"
-	@echo "make query         - Query inventory"
+	@echo "make query         - Query inventory summary"
+	@echo "make query-export  - Export inventory to JSON"
+	@echo "make query-recent  - Show recent discoveries"
 	@echo "make clean         - Clean up generated files"
 
 install:
@@ -41,7 +43,13 @@ collect:
 	python src/collector/main.py --config config/accounts.json
 
 query:
-	python src/query/inventory_query.py --action summary
+	python -m src.query.inventory_query --action summary
+
+query-export:
+	python -m src.query.inventory_query --action export --output inventory-export.json
+
+query-recent:
+	python -m src.query.inventory_query --action recent --hours 24
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +
