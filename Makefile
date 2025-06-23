@@ -45,16 +45,16 @@ collect:
 	python src/collector/enhanced_main.py --config config/accounts.json
 
 query:
-	python -m src.query.enhanced_inventory_query --action summary
+	python -m src.query.inventory_query --action summary
 
 query-cost:
-	python -m src.query.enhanced_inventory_query --action cost
+	python -m src.query.inventory_query --action cost
 
 query-security:
-	python -m src.query.enhanced_inventory_query --action security
+	python -m src.query.inventory_query --action security
 
 query-export:
-	python -m src.query.enhanced_inventory_query --action export --output inventory-export.csv
+	python -m src.query.inventory_query --action export --output inventory-export.csv
 
 test:
 	python -m pytest tests/unit/test_enhanced_collector.py -v

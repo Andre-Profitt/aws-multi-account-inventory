@@ -1,28 +1,52 @@
 {
   "accounts": {
-    "production": {
+    "engineering": {
       "account_id": "123456789012",
       "role_name": "InventoryRole",
-      "tags": {
-        "Environment": "Production",
-        "Department": "Engineering"
-      }
+      "enabled": true
     },
-    "staging": {
+    "marketing": {
       "account_id": "234567890123",
       "role_name": "InventoryRole",
-      "tags": {
-        "Environment": "Staging",
-        "Department": "Engineering"
-      }
+      "enabled": true
+    },
+    "finance": {
+      "account_id": "345678901234",
+      "role_name": "InventoryRole",
+      "enabled": true
+    },
+    "development": {
+      "account_id": "456789012345",
+      "role_name": "InventoryRole",
+      "enabled": true
+    },
+    "production": {
+      "account_id": "567890123456",
+      "role_name": "InventoryRole",
+      "enabled": true
     }
   },
+  "resource_types": ["ec2", "rds", "s3", "lambda"],
+  "excluded_regions": [
+    "ap-south-2",
+    "ap-southeast-4",
+    "eu-central-2",
+    "eu-south-2",
+    "me-central-1"
+  ],
   "collection_settings": {
-    "regions": ["us-east-1", "us-west-2", "eu-west-1"],
-    "resource_types": ["ec2_instance", "rds_instance", "s3_bucket", "lambda_function"],
-    "cost_thresholds": {
-      "monthly_alert": 10000,
-      "resource_alert": 500
-    }
+    "parallel_regions": 10,
+    "timeout_seconds": 300,
+    "retry_attempts": 3
+  },
+  "cost_thresholds": {
+    "expensive_resource_monthly": 100,
+    "idle_resource_days": 30,
+    "stale_resource_days": 90
+  },
+  "notifications": {
+    "sns_topic_arn": "arn:aws:sns:us-east-1:999999999999:inventory-alerts",
+    "email_on_failure": true,
+    "slack_webhook_url": ""
   }
 }

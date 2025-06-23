@@ -2,12 +2,13 @@ import boto3
 import json
 import os
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Any, Optional
 from botocore.exceptions import ClientError
 import time
 from decimal import Decimal
+import click
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,6 +22,9 @@ class AWSInventoryCollector:
         self.dynamodb = boto3.resource('dynamodb')
         self.table = self.dynamodb.Table(table_name)
         self.accounts = {}
+        self.failed_collections = []
+        self.excluded_regions = []
+        self.resource_types = ['ec2', 'rds', 's3', 'lambda']
         self.external_id = os.environ.get('EXTERNAL_ID', 'inventory-collector')
         
         # Cost estimation (simplified, per hour)
@@ -53,7 +57,11 @@ class AWSInventoryCollector:
         with open(config_path, 'r') as f:
             config = json.load(f)
             self.accounts = config.get('accounts', {})
-            logger.info(f"Loaded {len(self.accounts)} accounts from config")
+            self.excluded_regions = config.get('excluded_regions', [])
+            self.resource_types = config.get('resource_types', ['ec2', 'rds', 's3', 'lambda'])
+            # Filter enabled accounts only
+            self.accounts = {k: v for k, v in self.accounts.items() if v.get('enabled', True)}
+            logger.info(f"Loaded {len(self.accounts)} active accounts from config")
     
     def assume_role(self, account_id: str, role_name: str = 'InventoryRole', 
                     session_name: str = None) -> boto3.Session:
@@ -88,11 +96,13 @@ class AWSInventoryCollector:
                     raise
     
     def get_regions(self, session: boto3.Session) -> List[str]:
-        """Get list of enabled regions"""
+        """Get list of enabled regions minus excluded ones"""
         ec2 = session.client('ec2')
         try:
             response = ec2.describe_regions()
-            return [region['RegionName'] for region in response['Regions']]
+            regions = [region['RegionName'] for region in response['Regions']]
+            # Filter out excluded regions
+            return [r for r in regions if r not in self.excluded_regions]
         except Exception as e:
             logger.error(f"Failed to get regions: {e}")
             return ['us-east-1']  # fallback
@@ -308,7 +318,7 @@ class AWSInventoryCollector:
                             {'Name': 'BucketName', 'Value': bucket_name},
                             {'Name': 'StorageType', 'Value': 'StandardStorage'}
                         ],
-                        StartTime=datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0),
+                        StartTime=datetime.now(timezone.utc) - timedelta(days=1),
                         EndTime=datetime.now(timezone.utc),
                         Period=86400,
                         Statistics=['Average']
@@ -322,9 +332,33 @@ class AWSInventoryCollector:
                             'size_bytes': size_bytes,
                             'storage_class': 'standard'
                         })
+                    else:
+                        bucket_info['attributes']['size_bytes'] = 0
+                        bucket_info['estimated_monthly_cost'] = 0
                 except Exception:
                     bucket_info['attributes']['size_bytes'] = 0
                     bucket_info['estimated_monthly_cost'] = 0
+                
+                # Get object count
+                try:
+                    count_metrics = cloudwatch.get_metric_statistics(
+                        Namespace='AWS/S3',
+                        MetricName='NumberOfObjects',
+                        Dimensions=[
+                            {'Name': 'BucketName', 'Value': bucket_name},
+                            {'Name': 'StorageType', 'Value': 'AllStorageTypes'}
+                        ],
+                        StartTime=datetime.now(timezone.utc) - timedelta(days=1),
+                        EndTime=datetime.now(timezone.utc),
+                        Period=86400,
+                        Statistics=['Average']
+                    )
+                    if count_metrics['Datapoints']:
+                        bucket_info['attributes']['object_count'] = int(count_metrics['Datapoints'][0]['Average'])
+                    else:
+                        bucket_info['attributes']['object_count'] = 0
+                except Exception:
+                    bucket_info['attributes']['object_count'] = None
                 
                 # Get bucket tags
                 try:
@@ -381,9 +415,9 @@ class AWSInventoryCollector:
                             Namespace='AWS/Lambda',
                             MetricName='Invocations',
                             Dimensions=[{'Name': 'FunctionName', 'Value': function_name}],
-                            StartTime=datetime.now(timezone.utc).replace(day=1),
+                            StartTime=datetime.now(timezone.utc) - timedelta(days=30),
                             EndTime=datetime.now(timezone.utc),
-                            Period=86400 * 30,
+                            Period=2592000,  # 30 days
                             Statistics=['Sum']
                         )
                         
@@ -395,9 +429,9 @@ class AWSInventoryCollector:
                             Namespace='AWS/Lambda',
                             MetricName='Errors',
                             Dimensions=[{'Name': 'FunctionName', 'Value': function_name}],
-                            StartTime=datetime.now(timezone.utc).replace(day=1),
+                            StartTime=datetime.now(timezone.utc) - timedelta(days=30),
                             EndTime=datetime.now(timezone.utc),
-                            Period=86400 * 30,
+                            Period=2592000,
                             Statistics=['Sum']
                         )
                         
@@ -430,8 +464,8 @@ class AWSInventoryCollector:
                             'last_modified': function.get('LastModified'),
                             'description': function.get('Description', ''),
                             'role': function.get('Role'),
-                            'invocations_monthly': invocations,
-                            'errors_monthly': errors,
+                            'invocations_30d': invocations,
+                            'errors_30d': errors,
                             'error_rate': round((errors / invocations * 100), 2) if invocations > 0 else 0,
                             'tags': function.get('Tags', {})
                         },
@@ -460,7 +494,8 @@ class AWSInventoryCollector:
             all_resources = []
             
             # Collect S3 buckets (global service)
-            all_resources.extend(self.collect_s3_buckets(session, account_id, account_name))
+            if 's3' in self.resource_types:
+                all_resources.extend(self.collect_s3_buckets(session, account_id, account_name))
             
             # Collect regional resources in parallel
             with ThreadPoolExecutor(max_workers=10) as executor:
@@ -468,17 +503,20 @@ class AWSInventoryCollector:
                 
                 for region in regions:
                     # EC2 instances
-                    futures.append(
-                        executor.submit(self.collect_ec2_instances, session, region, account_id, account_name)
-                    )
+                    if 'ec2' in self.resource_types:
+                        futures.append(
+                            executor.submit(self.collect_ec2_instances, session, region, account_id, account_name)
+                        )
                     # RDS instances
-                    futures.append(
-                        executor.submit(self.collect_rds_instances, session, region, account_id, account_name)
-                    )
+                    if 'rds' in self.resource_types:
+                        futures.append(
+                            executor.submit(self.collect_rds_instances, session, region, account_id, account_name)
+                        )
                     # Lambda functions
-                    futures.append(
-                        executor.submit(self.collect_lambda_functions, session, region, account_id, account_name)
-                    )
+                    if 'lambda' in self.resource_types:
+                        futures.append(
+                            executor.submit(self.collect_lambda_functions, session, region, account_id, account_name)
+                        )
                 
                 # Collect results
                 for future in as_completed(futures):
@@ -493,6 +531,11 @@ class AWSInventoryCollector:
             
         except Exception as e:
             logger.error(f"Failed to collect inventory from {account_name}: {e}")
+            self.failed_collections.append({
+                'department': account_name,
+                'account_id': account_id,
+                'error': str(e)
+            })
             return []
     
     def save_to_dynamodb(self, resources: List[Dict]):
@@ -513,12 +556,15 @@ class AWSInventoryCollector:
         # Batch write to DynamoDB
         with self.table.batch_writer() as batch:
             for resource in resources:
-                # Create composite key
-                composite_key = f"{resource['resource_type']}#{resource['resource_id']}"
+                # Create pk/sk pattern for better querying
+                pk = f"{resource['resource_type']}#{resource['account_id']}#{resource.get('region', 'global')}#{resource['resource_id']}"
+                sk = resource['timestamp']
                 
                 item = {
-                    'composite_key': composite_key,
-                    'timestamp': resource['timestamp'],
+                    'pk': pk,
+                    'sk': sk,
+                    'resource_type': resource['resource_type'],
+                    'department': resource.get('account_name', 'unknown'),
                     **convert_floats(resource)
                 }
                 
@@ -533,6 +579,7 @@ class AWSInventoryCollector:
             return []
         
         all_resources = []
+        self.failed_collections = []  # Reset failed collections
         
         # Process accounts in parallel
         with ThreadPoolExecutor(max_workers=5) as executor:
@@ -548,29 +595,48 @@ class AWSInventoryCollector:
                     all_resources.extend(resources)
                 except Exception as e:
                     logger.error(f"Failed to process account {account_name}: {e}")
+                    self.failed_collections.append({
+                        'department': account_name,
+                        'account_id': self.accounts[account_name]['account_id'],
+                        'error': str(e)
+                    })
         
         # Save to DynamoDB
         self.save_to_dynamodb(all_resources)
         
+        # Log summary of failed collections
+        if self.failed_collections:
+            logger.warning(f"Failed collections: {len(self.failed_collections)}")
+            for failure in self.failed_collections:
+                logger.warning(f"  - {failure['department']} ({failure['account_id']}): {failure['error']}")
+        
         return all_resources
 
 
-def main():
-    """Main function for local execution"""
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='AWS Multi-Account Inventory Collector')
-    parser.add_argument('--config', required=True, help='Path to accounts configuration file')
-    parser.add_argument('--table', default='aws-inventory', help='DynamoDB table name')
-    parser.add_argument('--debug', action='store_true', help='Enable debug logging')
-    
-    args = parser.parse_args()
-    
-    if args.debug:
+@click.command()
+@click.option('--config', default='config/accounts.json', help='Config file path')
+@click.option('--table', default='aws-inventory', help='DynamoDB table name')
+@click.option('--dry-run', is_flag=True, help='Show what would be collected')
+@click.option('--resource-types', help='Comma-separated resource types to collect (ec2,rds,s3,lambda)')
+@click.option('--debug', is_flag=True, help='Enable debug logging')
+def main(config, table, dry_run, resource_types, debug):
+    """AWS Multi-Account Inventory Collector"""
+    if debug:
         logging.getLogger().setLevel(logging.DEBUG)
     
-    collector = AWSInventoryCollector(table_name=args.table)
-    collector.load_config(args.config)
+    collector = AWSInventoryCollector(table_name=table)
+    collector.load_config(config)
+    
+    if resource_types:
+        collector.resource_types = resource_types.split(',')
+    
+    if dry_run:
+        logger.info("DRY RUN - Would collect:")
+        for dept, info in collector.accounts.items():
+            logger.info(f"  {dept}: {info['account_id']}")
+        logger.info(f"Resource types: {collector.resource_types}")
+        logger.info(f"Excluded regions: {collector.excluded_regions}")
+        return
     
     resources = collector.collect_inventory()
     
@@ -590,6 +656,9 @@ def main():
     print("-" * 50)
     print(f"Total resources: {len(resources)}")
     print(f"Estimated monthly cost: ${total_cost:,.2f}")
+    
+    if collector.failed_collections:
+        print(f"\nFailed collections: {len(collector.failed_collections)}")
 
 
 if __name__ == '__main__':

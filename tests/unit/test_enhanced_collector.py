@@ -15,8 +15,15 @@ from collector.enhanced_main import AWSInventoryCollector
 class TestAWSInventoryCollector(unittest.TestCase):
     """Unit tests for enhanced AWS Inventory Collector"""
     
-    def setUp(self):
+    @patch('collector.enhanced_main.boto3.resource')
+    def setUp(self, mock_boto_resource):
         """Set up test fixtures"""
+        # Mock DynamoDB resource
+        mock_dynamodb = Mock()
+        mock_table = Mock()
+        mock_boto_resource.return_value = mock_dynamodb
+        mock_dynamodb.Table.return_value = mock_table
+        
         self.collector = AWSInventoryCollector(table_name='test-inventory')
         self.collector.accounts = {
             'test-account': {
@@ -370,10 +377,10 @@ class TestAWSInventoryCollector(unittest.TestCase):
 class TestInventoryQuery(unittest.TestCase):
     """Unit tests for enhanced inventory query"""
     
-    @patch('query.enhanced_inventory_query.boto3.resource')
+    @patch('query.inventory_query.boto3.resource')
     def setUp(self, mock_boto_resource):
         """Set up test fixtures"""
-        from query.enhanced_inventory_query import InventoryQuery
+        from query.inventory_query import InventoryQuery
         
         self.mock_table = Mock()
         mock_dynamodb = Mock()
@@ -539,12 +546,12 @@ class TestLambdaHandlers(unittest.TestCase):
         os.environ['COST_ALERT_THRESHOLD'] = '5000'
         os.environ['REPORTS_S3_BUCKET'] = 'test-reports-bucket'
     
-    @patch('lambda.enhanced_handler.AWSInventoryCollector')
-    @patch('lambda.enhanced_handler.send_sns_notification')
-    @patch('lambda.enhanced_handler.put_cloudwatch_metrics')
+    @patch('handler.AWSInventoryCollector')
+    @patch('handler.send_notification')
+    @patch('handler.send_metric')
     def test_handle_collection_success(self, mock_metrics, mock_sns, mock_collector_class):
         """Test successful inventory collection"""
-        from lambda.enhanced_handler import handle_collection
+        from handler import handle_collection
         
         # Mock collector
         mock_collector = Mock()
@@ -596,12 +603,12 @@ class TestLambdaHandlers(unittest.TestCase):
         # Verify no alerts sent (under threshold)
         mock_sns.assert_not_called()
     
-    @patch('lambda.enhanced_handler.InventoryQuery')
-    @patch('lambda.enhanced_handler.send_sns_notification')
-    @patch('lambda.enhanced_handler.boto3.client')
+    @patch('handler.InventoryQuery')
+    @patch('handler.send_notification')
+    @patch('handler.boto3.client')
     def test_handle_cost_analysis(self, mock_boto_client, mock_sns, mock_query_class):
         """Test cost analysis handler"""
-        from lambda.enhanced_handler import handle_cost_analysis
+        from handler import handle_cost_analysis
         
         # Mock query
         mock_query = Mock()

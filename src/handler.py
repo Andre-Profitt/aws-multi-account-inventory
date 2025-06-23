@@ -2,11 +2,8 @@ import json
 import os
 import sys
 import boto3
-from datetime import datetime
+from datetime import datetime, timezone
 import traceback
-
-# Add src directory to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from collector.enhanced_main import AWSInventoryCollector
 from query.inventory_query import InventoryQuery
@@ -26,7 +23,7 @@ def send_metric(metric_name: str, value: float, unit: str = 'Count'):
                     'MetricName': metric_name,
                     'Value': value,
                     'Unit': unit,
-                    'Timestamp': datetime.utcnow()
+                    'Timestamp': datetime.now(timezone.utc)
                 }
             ]
         )
@@ -48,7 +45,7 @@ def send_notification(subject: str, message: str):
 
 def lambda_handler(event, context):
     """Enhanced Lambda handler for scheduled collection"""
-    start_time = datetime.utcnow()
+    start_time = datetime.now(timezone.utc)
     action = event.get('action', 'collect')
     
     # Log invocation
@@ -103,7 +100,7 @@ def handle_collection(event, context, start_time):
     inventory = collector.collect_inventory()
     
     # Calculate metrics
-    duration = (datetime.utcnow() - start_time).total_seconds()
+    duration = (datetime.now(timezone.utc) - start_time).total_seconds()
     resources_collected = len(inventory)
     failed_accounts = len(collector.failed_collections)
     
@@ -223,7 +220,7 @@ Please review the cost analysis dashboard for more details."""
     # Generate and save cost report
     report_bucket = os.environ.get('REPORT_BUCKET')
     if report_bucket:
-        report_key = f"cost-reports/{datetime.utcnow().strftime('%Y/%m/%d')}/cost_analysis.json"
+        report_key = f"cost-reports/{datetime.now(timezone.utc).strftime('%Y/%m/%d')}/cost_analysis.json"
         
         s3.put_object(
             Bucket=report_bucket,
@@ -297,10 +294,10 @@ Please review these resources and apply appropriate security measures."""
     # Save security report
     report_bucket = os.environ.get('REPORT_BUCKET')
     if report_bucket:
-        report_key = f"security-reports/{datetime.utcnow().strftime('%Y/%m/%d')}/security_check.json"
+        report_key = f"security-reports/{datetime.now(timezone.utc).strftime('%Y/%m/%d')}/security_check.json"
         
         security_report = {
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
             'total_issues': total_issues,
             'unencrypted_resources': analysis['unencrypted_resources'],
             'public_resources': analysis['public_resources']

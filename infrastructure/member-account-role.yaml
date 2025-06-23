@@ -1,0 +1,215 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Cross-account role for AWS Inventory collection in member accounts'
+
+Parameters:
+  MasterAccountId:
+    Type: String
+    Description: Account ID of the master account running the inventory collector
+    
+  ExternalId:
+    Type: String
+    Description: External ID for role assumption
+    Default: inventory-collector
+    
+  OrganizationId:
+    Type: String
+    Description: AWS Organization ID
+    Default: ''
+
+Conditions:
+  HasOrganizationId: !Not [!Equals [!Ref OrganizationId, '']]
+
+Resources:
+  InventoryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AWSInventoryRole
+      Description: Cross-account role for AWS Inventory collection
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${MasterAccountId}:root'
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                'sts:ExternalId': !Ref ExternalId
+              !If
+                - HasOrganizationId
+                - StringEquals:
+                    'aws:PrincipalOrgID': !Ref OrganizationId
+                - !Ref 'AWS::NoValue'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/SecurityAudit
+        - arn:aws:iam::aws:policy/job-function/ViewOnlyAccess
+      Policies:
+        - PolicyName: InventoryCollectionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # EC2 Permissions
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeImages
+                  - ec2:DescribeSnapshots
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeTags
+                Resource: '*'
+              
+              # RDS Permissions
+              - Effect: Allow
+                Action:
+                  - rds:DescribeDBInstances
+                  - rds:DescribeDBClusters
+                  - rds:DescribeDBSnapshots
+                  - rds:ListTagsForResource
+                  - rds:DescribeDBSubnetGroups
+                  - rds:DescribeDBParameterGroups
+                  - rds:DescribeDBClusterParameterGroups
+                Resource: '*'
+              
+              # S3 Permissions
+              - Effect: Allow
+                Action:
+                  - s3:ListAllMyBuckets
+                  - s3:GetBucketLocation
+                  - s3:GetBucketVersioning
+                  - s3:GetBucketEncryption
+                  - s3:GetBucketTagging
+                  - s3:GetBucketAcl
+                  - s3:GetBucketPolicy
+                  - s3:GetBucketPublicAccessBlock
+                  - s3:GetBucketLogging
+                  - s3:GetLifecycleConfiguration
+                  - s3:GetBucketReplication
+                  - s3:GetBucketCORS
+                  - s3:GetBucketNotification
+                  - s3:GetBucketWebsite
+                Resource: '*'
+              
+              # Lambda Permissions
+              - Effect: Allow
+                Action:
+                  - lambda:ListFunctions
+                  - lambda:GetFunction
+                  - lambda:GetFunctionConfiguration
+                  - lambda:ListTags
+                  - lambda:GetPolicy
+                  - lambda:ListVersionsByFunction
+                  - lambda:ListAliases
+                  - lambda:GetAccountSettings
+                Resource: '*'
+              
+              # CloudWatch Permissions for metrics
+              - Effect: Allow
+                Action:
+                  - cloudwatch:GetMetricStatistics
+                  - cloudwatch:ListMetrics
+                  - cloudwatch:GetMetricData
+                Resource: '*'
+              
+              # Cost Explorer Permissions
+              - Effect: Allow
+                Action:
+                  - ce:GetCostAndUsage
+                  - ce:GetCostForecast
+                  - ce:GetReservationUtilization
+                  - ce:GetSavingsPlansPurchaseRecommendation
+                  - ce:GetRightsizingRecommendation
+                Resource: '*'
+              
+              # Organizations Permissions (if in an Organization)
+              - Effect: Allow
+                Action:
+                  - organizations:DescribeOrganization
+                  - organizations:ListAccounts
+                  - organizations:DescribeAccount
+                Resource: '*'
+              
+              # Tag Permissions
+              - Effect: Allow
+                Action:
+                  - tag:GetResources
+                  - tag:GetTagKeys
+                  - tag:GetTagValues
+                Resource: '*'
+              
+              # CloudFormation Permissions
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                  - cloudformation:ListStacks
+                  - cloudformation:GetTemplate
+                  - cloudformation:GetTemplateSummary
+                Resource: '*'
+              
+              # Additional Services (optional)
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:DescribeLoadBalancers
+                  - elasticloadbalancing:DescribeTargetGroups
+                  - elasticloadbalancing:DescribeTags
+                  - autoscaling:DescribeAutoScalingGroups
+                  - autoscaling:DescribeTags
+                  - ecs:ListClusters
+                  - ecs:DescribeClusters
+                  - ecs:ListServices
+                  - ecs:DescribeServices
+                  - ecs:ListTasks
+                  - ecs:DescribeTasks
+                  - ecs:ListTagsForResource
+                  - eks:ListClusters
+                  - eks:DescribeCluster
+                  - elasticache:DescribeCacheClusters
+                  - elasticache:ListTagsForResource
+                  - es:ListDomainNames
+                  - es:DescribeElasticsearchDomains
+                  - dynamodb:ListTables
+                  - dynamodb:DescribeTable
+                  - dynamodb:ListTagsOfResource
+                Resource: '*'
+      Tags:
+        - Key: Application
+          Value: AWS-Inventory
+        - Key: Purpose
+          Value: Cross-account inventory collection
+
+Outputs:
+  RoleArn:
+    Description: ARN of the inventory collection role
+    Value: !GetAtt InventoryRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleArn'
+
+  RoleName:
+    Description: Name of the inventory collection role
+    Value: !Ref InventoryRole
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleName'
+
+  TrustPolicy:
+    Description: Trust policy for the role
+    Value: !Sub |
+      {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "AWS": "arn:aws:iam::${MasterAccountId}:root"
+            },
+            "Action": "sts:AssumeRole",
+            "Condition": {
+              "StringEquals": {
+                "sts:ExternalId": "${ExternalId}"
+              }
+            }
+          }
+        ]
+      }

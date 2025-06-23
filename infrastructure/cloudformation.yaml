@@ -1,0 +1,525 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS Multi-Account Inventory System with enhanced features'
+
+Parameters:
+  OrganizationId:
+    Type: String
+    Description: AWS Organization ID for cross-account role trust
+    
+  ExternalId:
+    Type: String
+    Description: External ID for role assumption
+    Default: inventory-collector
+    
+  MonthlyCostThreshold:
+    Type: Number
+    Description: Monthly cost threshold for alerts (USD)
+    Default: 10000
+    
+  EmailAddress:
+    Type: String
+    Description: Email address for notifications
+    
+  SlackWebhookUrl:
+    Type: String
+    Description: Slack webhook URL for notifications (optional)
+    Default: ''
+    NoEcho: true
+    
+  CollectionSchedule:
+    Type: String
+    Description: Schedule expression for inventory collection
+    Default: 'rate(12 hours)'
+    
+  CostAnalysisSchedule:
+    Type: String
+    Description: Schedule expression for cost analysis
+    Default: 'cron(0 8 * * ? *)'  # Daily at 8 AM UTC
+    
+  SecurityCheckSchedule:
+    Type: String
+    Description: Schedule expression for security checks
+    Default: 'cron(0 10 * * MON *)'  # Weekly on Monday at 10 AM UTC
+    
+  CleanupSchedule:
+    Type: String
+    Description: Schedule expression for stale resource checks
+    Default: 'cron(0 6 1 * ? *)'  # Monthly on the 1st at 6 AM UTC
+
+Conditions:
+  HasSlackWebhook: !Not [!Equals [!Ref SlackWebhookUrl, '']]
+
+Resources:
+  # DynamoDB Table with GSIs
+  InventoryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: aws-inventory
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+        - AttributeName: resource_type
+          AttributeType: S
+        - AttributeName: department
+          AttributeType: S
+        - AttributeName: account_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: resource-type-index
+          KeySchema:
+            - AttributeName: resource_type
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: department-index
+          KeySchema:
+            - AttributeName: department
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: account-index
+          KeySchema:
+            - AttributeName: account_id
+              KeyType: HASH
+            - AttributeName: timestamp
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Application
+          Value: AWS-Inventory
+        - Key: Environment
+          Value: Production
+
+  # S3 Bucket for reports
+  ReportsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'aws-inventory-reports-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldReports
+            Status: Enabled
+            ExpirationInDays: 90
+          - Id: TransitionToIA
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Application
+          Value: AWS-Inventory
+
+  # SNS Topic for notifications
+  NotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: aws-inventory-alerts
+      DisplayName: AWS Inventory Alerts
+      Subscription:
+        - Endpoint: !Ref EmailAddress
+          Protocol: email
+      Tags:
+        - Key: Application
+          Value: AWS-Inventory
+
+  # Lambda Layer for dependencies
+  DependenciesLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: aws-inventory-dependencies
+      Description: Dependencies for AWS Inventory Lambda functions
+      Content:
+        S3Bucket: !Sub 'aws-inventory-artifacts-${AWS::Region}'
+        S3Key: layers/dependencies.zip
+      CompatibleRuntimes:
+        - python3.9
+        - python3.10
+        - python3.11
+
+  # Lambda Execution Role
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: aws-inventory-lambda-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: InventoryPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource:
+                  - !GetAtt InventoryTable.Arn
+                  - !Sub '${InventoryTable.Arn}/index/*'
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref NotificationTopic
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub '${ReportsBucket.Arn}/*'
+              - Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                Resource: !Sub 'arn:aws:iam::*:role/AWSInventoryRole'
+                Condition:
+                  StringEquals:
+                    'sts:ExternalId': !Ref ExternalId
+              - Effect: Allow
+                Action:
+                  - organizations:ListAccounts
+                  - organizations:DescribeAccount
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeImages
+                  - ec2:DescribeSnapshots
+                  - ec2:DescribeVolumes
+                  - rds:DescribeDBInstances
+                  - rds:DescribeDBClusters
+                  - rds:ListTagsForResource
+                  - s3:ListAllMyBuckets
+                  - s3:GetBucketLocation
+                  - s3:GetBucketVersioning
+                  - s3:GetBucketEncryption
+                  - s3:GetBucketTagging
+                  - s3:GetBucketAcl
+                  - s3:GetBucketPublicAccessBlock
+                  - lambda:ListFunctions
+                  - lambda:GetFunction
+                  - lambda:ListTags
+                  - cloudwatch:GetMetricStatistics
+                Resource: '*'
+      Tags:
+        - Key: Application
+          Value: AWS-Inventory
+
+  # Main Lambda Function
+  InventoryLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: aws-inventory-collector
+      Description: AWS Multi-Account Inventory Collector
+      Runtime: python3.9
+      Handler: handler.lambda_handler
+      Code:
+        S3Bucket: !Sub 'aws-inventory-artifacts-${AWS::Region}'
+        S3Key: lambda/inventory-collector.zip
+      Layers:
+        - !Ref DependenciesLayer
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 900  # 15 minutes
+      MemorySize: 1024
+      ReservedConcurrentExecutions: 5
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref InventoryTable
+          SNS_TOPIC_ARN: !Ref NotificationTopic
+          REPORT_BUCKET: !Ref ReportsBucket
+          MONTHLY_COST_THRESHOLD: !Ref MonthlyCostThreshold
+          EXTERNAL_ID: !Ref ExternalId
+          CONFIG_PATH: /opt/config/accounts.json
+      Tags:
+        - Key: Application
+          Value: AWS-Inventory
+
+  # CloudWatch Log Group
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${InventoryLambda}'
+      RetentionInDays: 30
+
+  # EventBridge Rules for scheduled execution
+  CollectionScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: aws-inventory-collection
+      Description: Schedule for inventory collection
+      ScheduleExpression: !Ref CollectionSchedule
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt InventoryLambda.Arn
+          Id: CollectionTarget
+          Input: '{"action": "collect"}'
+
+  CostAnalysisScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: aws-inventory-cost-analysis
+      Description: Schedule for cost analysis
+      ScheduleExpression: !Ref CostAnalysisSchedule
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt InventoryLambda.Arn
+          Id: CostAnalysisTarget
+          Input: '{"action": "cost_analysis"}'
+
+  SecurityCheckScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: aws-inventory-security-check
+      Description: Schedule for security compliance checks
+      ScheduleExpression: !Ref SecurityCheckSchedule
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt InventoryLambda.Arn
+          Id: SecurityCheckTarget
+          Input: '{"action": "security_check"}'
+
+  CleanupScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: aws-inventory-cleanup-check
+      Description: Schedule for stale resource checks
+      ScheduleExpression: !Ref CleanupSchedule
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt InventoryLambda.Arn
+          Id: CleanupTarget
+          Input: '{"action": "cleanup"}'
+
+  # Lambda permissions for EventBridge
+  CollectionSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref InventoryLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt CollectionScheduleRule.Arn
+
+  CostAnalysisSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref InventoryLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt CostAnalysisScheduleRule.Arn
+
+  SecurityCheckSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref InventoryLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt SecurityCheckScheduleRule.Arn
+
+  CleanupSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref InventoryLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt CleanupScheduleRule.Arn
+
+  # CloudWatch Dashboard
+  InventoryDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: AWS-Inventory-Dashboard
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["AWSInventory", "ResourcesCollected", {"stat": "Average"}],
+                  [".", "FailedAccounts", {"stat": "Average"}]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "Collection Metrics"
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["AWSInventory", "TotalMonthlyCost", {"stat": "Average"}]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "Total Monthly Cost"
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["AWSInventory", "UnencryptedResources", {"stat": "Average"}],
+                  [".", "PublicResources", {"stat": "Average"}],
+                  [".", "SecurityIssues", {"stat": "Average"}]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "Security Metrics"
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["AWSInventory", "CollectionDuration", {"stat": "Average"}]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "Collection Duration (seconds)"
+              }
+            }
+          ]
+        }
+
+  # CloudWatch Alarms
+  HighCostAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: AWS-Inventory-High-Cost
+      AlarmDescription: Alert when monthly cost exceeds threshold
+      MetricName: TotalMonthlyCost
+      Namespace: AWSInventory
+      Statistic: Average
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: !Ref MonthlyCostThreshold
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref NotificationTopic
+      TreatMissingData: notBreaching
+
+  CollectionFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: AWS-Inventory-Collection-Failure
+      AlarmDescription: Alert when collection fails
+      MetricName: CollectionSuccess
+      Namespace: AWSInventory
+      Statistic: Average
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      AlarmActions:
+        - !Ref NotificationTopic
+      TreatMissingData: breaching
+
+  SecurityIssuesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: AWS-Inventory-Security-Issues
+      AlarmDescription: Alert when security issues exceed threshold
+      MetricName: SecurityIssues
+      Namespace: AWSInventory
+      Statistic: Average
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref NotificationTopic
+      TreatMissingData: notBreaching
+
+  # Cross-account role for member accounts (deploy in each member account)
+  MemberAccountRole:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub 'https://aws-inventory-artifacts-${AWS::Region}.s3.amazonaws.com/templates/member-account-role.yaml'
+      Parameters:
+        MasterAccountId: !Ref AWS::AccountId
+        ExternalId: !Ref ExternalId
+        OrganizationId: !Ref OrganizationId
+
+Outputs:
+  InventoryTableName:
+    Description: Name of the DynamoDB inventory table
+    Value: !Ref InventoryTable
+    Export:
+      Name: !Sub '${AWS::StackName}-InventoryTable'
+
+  InventoryTableStreamArn:
+    Description: ARN of the DynamoDB table stream
+    Value: !GetAtt InventoryTable.StreamArn
+    Export:
+      Name: !Sub '${AWS::StackName}-TableStreamArn'
+
+  LambdaFunctionArn:
+    Description: ARN of the inventory Lambda function
+    Value: !GetAtt InventoryLambda.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaArn'
+
+  NotificationTopicArn:
+    Description: ARN of the SNS notification topic
+    Value: !Ref NotificationTopic
+    Export:
+      Name: !Sub '${AWS::StackName}-NotificationTopic'
+
+  ReportsBucketName:
+    Description: Name of the S3 reports bucket
+    Value: !Ref ReportsBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-ReportsBucket'
+
+  DashboardURL:
+    Description: URL to CloudWatch Dashboard
+    Value: !Sub 'https://console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=AWS-Inventory-Dashboard'
+
+  MemberAccountRoleTemplate:
+    Description: Template URL for member account role
+    Value: !Sub 'https://aws-inventory-artifacts-${AWS::Region}.s3.amazonaws.com/templates/member-account-role.yaml'
