@@ -8,14 +8,26 @@ import traceback
 from collector.enhanced_main import AWSInventoryCollector
 from query.enhanced_inventory_query import InventoryQuery
 
-# Initialize AWS clients
-sns = boto3.client('sns')
-cloudwatch = boto3.client('cloudwatch')
-s3 = boto3.client('s3')
+# AWS clients will be initialized when needed
+sns = None
+cloudwatch = None
+s3 = None
+
+def get_clients():
+    """Initialize AWS clients if not already done"""
+    global sns, cloudwatch, s3
+    if sns is None:
+        sns = boto3.client('sns')
+    if cloudwatch is None:
+        cloudwatch = boto3.client('cloudwatch')
+    if s3 is None:
+        s3 = boto3.client('s3')
+    return sns, cloudwatch, s3
 
 def send_metric(metric_name: str, value: float, unit: str = 'Count'):
     """Send custom metric to CloudWatch"""
     try:
+        _, cloudwatch, _ = get_clients()
         cloudwatch.put_metric_data(
             Namespace='AWSInventory',
             MetricData=[
@@ -35,6 +47,7 @@ def send_notification(subject: str, message: str):
     topic_arn = os.environ.get('SNS_TOPIC_ARN')
     if topic_arn:
         try:
+            sns, _, _ = get_clients()
             sns.publish(
                 TopicArn=topic_arn,
                 Subject=subject,
@@ -180,13 +193,13 @@ def handle_cost_analysis(event, context):
     analysis = query.get_cost_analysis()
     
     # Calculate total monthly cost
-    total_cost = sum(analysis['cost_by_type'].values())
+    total_cost = analysis.get('total_monthly_cost', 0)
     
     # Send cost metrics
     send_metric('TotalMonthlyCost', total_cost, 'None')
-    send_metric('ExpensiveResources', len(analysis['expensive_resources']))
-    send_metric('IdleResources', len(analysis['idle_resources']))
-    send_metric('UnencryptedResources', len(analysis['unencrypted_resources']))
+    send_metric('ExpensiveResources', len(analysis.get('top_expensive_resources', [])))
+    send_metric('IdleResources', len(analysis.get('idle_resources', [])))
+    send_metric('UnencryptedResources', len(analysis.get('unencrypted_resources', [])))
     
     # Check if cost exceeds threshold
     cost_threshold = float(os.environ.get('MONTHLY_COST_THRESHOLD', '10000'))
@@ -222,6 +235,7 @@ Please review the cost analysis dashboard for more details."""
     if report_bucket:
         report_key = f"cost-reports/{datetime.now(timezone.utc).strftime('%Y/%m/%d')}/cost_analysis.json"
         
+        _, _, s3 = get_clients()
         s3.put_object(
             Bucket=report_bucket,
             Key=report_key,
@@ -303,6 +317,7 @@ Please review these resources and apply appropriate security measures."""
             'public_resources': analysis['public_resources']
         }
         
+        _, _, s3 = get_clients()
         s3.put_object(
             Bucket=report_bucket,
             Key=report_key,
