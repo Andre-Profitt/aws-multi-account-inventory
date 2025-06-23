@@ -24,16 +24,44 @@ This system automatically discovers and catalogs AWS resources across multiple a
 
 ## Features
 
+### Core Features
 - **Multi-Account Support**: Collect inventory from unlimited AWS accounts
-- **Automated Collection**: Scheduled via EventBridge (default: every 6 hours)
+- **Automated Collection**: Scheduled via EventBridge (configurable, default: every 6 hours)
 - **Resource Types Supported**:
-  - EC2 Instances
-  - RDS Databases
-  - S3 Buckets
-  - (Easily extensible for more resource types)
+  - EC2 Instances (with state, type, and utilization tracking)
+  - RDS Databases and Clusters (with encryption status)
+  - S3 Buckets (with size, encryption, and public access status)
+  - Lambda Functions (with invocation metrics and error rates)
 - **Secure Cross-Account Access**: Uses IAM role assumption with external ID
 - **Serverless Architecture**: No infrastructure to manage
 - **Cost Effective**: Typically < $15/month for most organizations
+
+### Enhanced Features
+- **Cost Analysis & Optimization**:
+  - Real-time cost estimation for all resources
+  - Daily cost analysis reports
+  - Identification of idle and oversized resources
+  - Monthly cost projections and alerts
+- **Security Compliance**:
+  - Weekly security checks
+  - Detection of unencrypted resources
+  - Public access monitoring for S3 buckets
+  - Automated compliance alerts
+- **Advanced Querying**:
+  - Filter by account, region, resource type, or tags
+  - Export to CSV for external analysis
+  - Department and cost center reporting
+  - Stale resource identification
+- **Monitoring & Alerts**:
+  - CloudWatch dashboard with key metrics
+  - SNS notifications for cost thresholds
+  - Error tracking and alerting
+  - Collection performance metrics
+- **Automated Reporting**:
+  - Daily cost reports
+  - Weekly security summaries
+  - Monthly optimization recommendations
+  - All reports saved to S3
 
 ## Quick Start
 
@@ -140,28 +168,40 @@ make collect
 
 ### Query Inventory
 
-The project includes a comprehensive query tool for analyzing inventory data:
+The project includes an enhanced query tool with cost analysis and advanced filtering:
 
 ```bash
-# Show inventory summary
-python -m src.query.inventory_query --action summary
+# Show inventory summary with costs
+python -m src.query.enhanced_inventory_query --action summary
+
+# Perform cost analysis with optimization recommendations
+python -m src.query.enhanced_inventory_query --action cost
+
+# Security compliance check
+python -m src.query.enhanced_inventory_query --action security
+
+# Find stale resources (default: 90 days)
+python -m src.query.enhanced_inventory_query --action stale --days 60
+
+# Export to CSV with filters
+python -m src.query.enhanced_inventory_query --action export \
+  --department engineering \
+  --environment production \
+  --output engineering-prod.csv
 
 # Get resources by account
-python -m src.query.inventory_query --action by-account --account-id 123456789012
+python -m src.query.enhanced_inventory_query --action by-account \
+  --account-name production
 
-# Show recently discovered resources
-python -m src.query.inventory_query --action recent --hours 24
-
-# Export all data to JSON
-python -m src.query.inventory_query --action export --output inventory.json
+# Filter by multiple criteria
+python -m src.query.enhanced_inventory_query --action by-type \
+  --resource-type ec2_instance \
+  --region us-east-1 \
+  --days 7
 
 # Get details for a specific resource
-python -m src.query.inventory_query --action details --resource-id i-0123456789abcdef
-
-# Direct DynamoDB query
-aws dynamodb scan \
-  --table-name aws-inventory \
-  --query 'Items[*].{Type:resource_type.S,ID:resource_id.S,Account:account_name.S}'
+python -m src.query.enhanced_inventory_query --action details \
+  --resource-id i-0123456789abcdef
 ```
 
 ### Update Lambda Function
@@ -198,23 +238,52 @@ Examples:
 
 To add new resource types:
 
-1. Add collection method to `src/collector/main.py`:
+1. Add collection method to `src/collector/enhanced_main.py`:
 ```python
 def collect_new_resource(self, session, region, account_id, account_name):
-    # Your collection logic here
-    pass
+    resources = []
+    try:
+        client = session.client('service-name', region_name=region)
+        # Collection logic with pagination
+        paginator = client.get_paginator('describe_resources')
+        for page in paginator.paginate():
+            for resource in page['Resources']:
+                resources.append({
+                    'resource_type': 'new_resource',
+                    'resource_id': resource['Id'],
+                    'account_id': account_id,
+                    'account_name': account_name,
+                    'region': region,
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                    'attributes': {
+                        # Resource-specific attributes
+                    },
+                    'estimated_monthly_cost': self.estimate_cost(resource)
+                })
+    except Exception as e:
+        logger.error(f"Error collecting new resources: {e}")
+    return resources
 ```
 
-2. Add the method call in `collect_account_inventory()`:
+2. Add cost estimation method:
+```python
+def estimate_new_resource_cost(self, resource):
+    # Add pricing logic
+    return monthly_cost
+```
+
+3. Add the method call in `collect_account_inventory()`:
 ```python
 futures.append(
     executor.submit(self.collect_new_resource, session, region, account_id, account_name)
 )
 ```
 
-3. Update IAM policies if needed for new permissions
+4. Update IAM policies in CloudFormation template
 
-4. Rebuild and deploy:
+5. Add unit tests in `tests/unit/test_enhanced_collector.py`
+
+6. Rebuild and deploy:
 ```bash
 make build-lambda
 make deploy
@@ -222,12 +291,45 @@ make deploy
 
 ## Cost Optimization
 
-Estimated monthly costs:
-- Lambda: ~$0.20 (based on 6-hour schedule)
+### Estimated Monthly Costs
+- Lambda Execution: ~$1-2 (includes all scheduled functions)
 - DynamoDB: ~$5-10 (depending on data volume)
-- CloudWatch Logs: ~$0.50
+- CloudWatch Logs: ~$1-2
+- CloudWatch Metrics & Alarms: ~$1
+- S3 Reports Storage: ~$0.50
+- SNS Notifications: ~$0.10
 
-Total: **< $15/month** for most organizations
+Total: **< $15-20/month** for most organizations
+
+### Built-in Cost Optimization Features
+
+1. **Automated Cost Analysis**:
+   - Daily cost reports with trends
+   - Identification of top expensive resources
+   - Monthly cost projections
+
+2. **Resource Optimization Recommendations**:
+   - **Idle Resources**: EC2 instances stopped >30 days, unused Lambda functions
+   - **Oversized Resources**: Large instance types with low utilization
+   - **Stale Resources**: Empty S3 buckets, unused resources >90 days
+
+3. **Cost Alerts**:
+   - Configurable thresholds (default: $10,000/month)
+   - Per-resource cost tracking
+   - Department/cost center allocation
+
+4. **Example Savings Opportunities**:
+   ```bash
+   # View all optimization opportunities
+   python -m src.query.enhanced_inventory_query --action cost
+   
+   # Find idle resources
+   python -m src.query.enhanced_inventory_query --action stale --days 30
+   
+   # Export high-cost resources
+   python -m src.query.enhanced_inventory_query --action export \
+     --output high-cost-resources.csv
+   ```
 
 ## Troubleshooting
 
@@ -251,10 +353,53 @@ aws sts assume-role \
 
 ## Security
 
-- Cross-account access uses role assumption with external ID
-- Lambda function has minimal required permissions
-- All data is encrypted at rest in DynamoDB
-- No credentials are stored in code or configuration
+### Security Features
+
+1. **Access Control**:
+   - Cross-account access uses role assumption with external ID
+   - Lambda function has minimal required permissions
+   - All API calls are logged to CloudTrail
+
+2. **Data Protection**:
+   - All data encrypted at rest in DynamoDB
+   - S3 buckets use AES-256 encryption
+   - Reports bucket has versioning enabled
+   - No credentials stored in code or configuration
+
+3. **Compliance Monitoring**:
+   - **Weekly Security Checks**:
+     - Unencrypted RDS instances
+     - Unencrypted S3 buckets
+     - Public S3 buckets
+     - Missing security group rules
+   
+   - **Automated Alerts**:
+     ```bash
+     # Run security check manually
+     python -m src.query.enhanced_inventory_query --action security
+     ```
+
+4. **Network Security**:
+   - VPC endpoints for DynamoDB access (optional)
+   - No inbound network access required
+   - All traffic over HTTPS/TLS
+
+### Security Best Practices
+
+1. **IAM Role Configuration**:
+   - Use unique external IDs per environment
+   - Regularly rotate external IDs
+   - Audit role trust policies
+
+2. **Data Handling**:
+   - Enable DynamoDB point-in-time recovery
+   - Set appropriate S3 lifecycle policies
+   - Regular backup of configuration
+
+3. **Monitoring**:
+   - Enable CloudTrail for audit logging
+   - Set up GuardDuty for threat detection
+   - Regular review of access patterns
 
 ## Contributing
 

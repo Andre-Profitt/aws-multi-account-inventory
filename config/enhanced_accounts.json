@@ -1,0 +1,113 @@
+{
+  "accounts": {
+    "production": {
+      "account_id": "123456789012",
+      "role_name": "InventoryRole",
+      "tags": {
+        "Environment": "Production",
+        "CostCenter": "Engineering"
+      }
+    },
+    "staging": {
+      "account_id": "234567890123",
+      "role_name": "InventoryRole",
+      "tags": {
+        "Environment": "Staging",
+        "CostCenter": "Engineering"
+      }
+    },
+    "development": {
+      "account_id": "345678901234",
+      "role_name": "InventoryRole",
+      "tags": {
+        "Environment": "Development",
+        "CostCenter": "Engineering"
+      }
+    },
+    "marketing": {
+      "account_id": "456789012345",
+      "role_name": "InventoryRole",
+      "tags": {
+        "Environment": "Production",
+        "CostCenter": "Marketing",
+        "Department": "Marketing"
+      }
+    },
+    "finance": {
+      "account_id": "567890123456",
+      "role_name": "InventoryRole",
+      "tags": {
+        "Environment": "Production",
+        "CostCenter": "Finance",
+        "Department": "Finance"
+      }
+    },
+    "data-analytics": {
+      "account_id": "678901234567",
+      "role_name": "InventoryRole",
+      "tags": {
+        "Environment": "Production",
+        "CostCenter": "DataScience",
+        "Department": "Analytics"
+      }
+    }
+  },
+  "collection_settings": {
+    "regions": [
+      "us-east-1",
+      "us-west-2",
+      "eu-west-1",
+      "eu-central-1",
+      "ap-southeast-1"
+    ],
+    "resource_types": [
+      "ec2_instance",
+      "rds_instance",
+      "rds_cluster",
+      "s3_bucket",
+      "lambda_function"
+    ],
+    "cost_thresholds": {
+      "monthly_alert": 10000,
+      "resource_alert": 500
+    },
+    "optimization_rules": {
+      "idle_days": 30,
+      "stale_days": 90,
+      "oversized_types": [
+        "m5.2xlarge",
+        "m5.4xlarge",
+        "m5.8xlarge",
+        "r5.2xlarge",
+        "r5.4xlarge"
+      ]
+    }
+  },
+  "notification_settings": {
+    "sns_topic_arn": "arn:aws:sns:us-east-1:YOUR_ACCOUNT:aws-inventory-alerts",
+    "email_recipients": [
+      "devops@yourcompany.com",
+      "finance@yourcompany.com"
+    ],
+    "alert_types": [
+      "cost_threshold",
+      "security_issues",
+      "collection_errors",
+      "stale_resources"
+    ]
+  },
+  "report_settings": {
+    "s3_bucket": "your-inventory-reports",
+    "report_types": [
+      "daily_cost",
+      "weekly_summary",
+      "monthly_optimization",
+      "security_compliance"
+    ],
+    "export_formats": [
+      "json",
+      "csv",
+      "excel"
+    ]
+  }
+}
