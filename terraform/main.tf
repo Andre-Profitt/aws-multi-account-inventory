@@ -317,7 +317,7 @@ resource "aws_lambda_function" "inventory_collector" {
   filename         = "../lambda-deployment.zip"
   source_code_hash = filebase64sha256("../lambda-deployment.zip")
   
-  handler = "src.lambda.enhanced_handler.lambda_handler"
+  handler = "handler.lambda_handler"
   runtime = "python3.9"
   timeout = var.lambda_timeout
   memory_size = var.lambda_memory

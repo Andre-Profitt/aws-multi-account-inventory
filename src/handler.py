@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import traceback
 
 from collector.enhanced_main import AWSInventoryCollector
-from query.inventory_query import InventoryQuery
+from query.enhanced_inventory_query import InventoryQuery
 
 # Initialize AWS clients
 sns = boto3.client('sns')
