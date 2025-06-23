@@ -1,16 +1,28 @@
 {
   "accounts": {
-    "engineering": {
-      "account_id": "123456789012",
-      "role_name": "InventoryRole"
-    },
-    "marketing": {
-      "account_id": "234567890123",
-      "role_name": "InventoryRole"
-    },
     "production": {
-      "account_id": "345678901234",
-      "role_name": "InventoryRole"
+      "account_id": "123456789012",
+      "role_name": "InventoryRole",
+      "tags": {
+        "Environment": "Production",
+        "Department": "Engineering"
+      }
+    },
+    "staging": {
+      "account_id": "234567890123",
+      "role_name": "InventoryRole",
+      "tags": {
+        "Environment": "Staging",
+        "Department": "Engineering"
+      }
+    }
+  },
+  "collection_settings": {
+    "regions": ["us-east-1", "us-west-2", "eu-west-1"],
+    "resource_types": ["ec2_instance", "rds_instance", "s3_bucket", "lambda_function"],
+    "cost_thresholds": {
+      "monthly_alert": 10000,
+      "resource_alert": 500
     }
   }
 }

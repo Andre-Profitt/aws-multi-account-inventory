@@ -1,17 +1,38 @@
-# AWS region for deployment
+# AWS Configuration
 aws_region = "us-east-1"
-
-# Environment name
 environment = "production"
 
-# Lambda function configuration
-lambda_function_name = "aws-inventory-collector"
-lambda_timeout       = 300  # 5 minutes
-lambda_memory        = 512  # MB
+# Stack Configuration
+stack_name = "aws-inventory"
 
-# Schedule expression (EventBridge/CloudWatch Events syntax)
-# Examples:
-#   "rate(6 hours)"     - Every 6 hours
-#   "rate(1 day)"       - Daily
-#   "cron(0 12 * * ? *)" - Every day at 12:00 PM UTC
+# DynamoDB Configuration
+dynamodb_billing_mode = "PAY_PER_REQUEST"
+# For PROVISIONED mode, uncomment these:
+# dynamodb_billing_mode = "PROVISIONED"
+# dynamodb_read_capacity = 10
+# dynamodb_write_capacity = 10
+
+# Lambda Configuration
+lambda_timeout = 300
+lambda_memory = 1024
+
+# Schedule Configuration
 schedule_expression = "rate(6 hours)"
+
+# Alerts Configuration
+notification_email = "your-email@example.com"
+cost_alert_threshold = 10000
+
+# Monitoring
+enable_monitoring = true
+log_retention_days = 30
+
+# Security
+external_id = "your-unique-external-id"
+
+# Tags
+tags = {
+  Owner = "DevOps Team"
+  Project = "AWS Inventory"
+  CostCenter = "Engineering"
+}
