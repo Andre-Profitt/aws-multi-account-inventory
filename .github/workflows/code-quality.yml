@@ -59,7 +59,7 @@ jobs:
       
       - name: Upload Dead Code Report
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: dead-code-report
           path: dead_code_report.txt
@@ -86,7 +86,7 @@ jobs:
       
       - name: Upload Duplication Report
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: duplication-report
           path: cpd-report.xml

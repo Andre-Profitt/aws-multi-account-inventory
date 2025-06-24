@@ -74,7 +74,7 @@ jobs:
           out: tfsec-results.json
       
       - name: Upload tfsec results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: tfsec-results
           path: tfsec-results.json
