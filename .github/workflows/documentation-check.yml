@@ -1,0 +1,87 @@
+name: Documentation Quality Check
+
+on:
+  pull_request:
+    paths:
+      - '**/*.md'
+      - '**/*.rst'
+      - 'docs/**'
+
+jobs:
+  vale:
+    name: Vale Style Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Vale
+        uses: errata-ai/vale-action@v2
+        with:
+          config: audit/configs/vale.ini
+          files: all
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  markdown-lint:
+    name: Markdown Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: markdownlint
+        uses: DavidAnson/markdownlint-cli2-action@v9
+        with:
+          config: '.markdownlint.yml'
+          globs: '**/*.md'
+
+  link-check:
+    name: Broken Link Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Link Checker
+        uses: lycheeverse/lychee-action@v1
+        with:
+          fail: true
+          args: '--verbose --no-progress **/*.md'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  readability:
+    name: Readability Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install textstat
+        run: pip install textstat
+      
+      - name: Check Readability
+        run: |
+          python -c "
+          import textstat
+          import glob
+          import sys
+          
+          failed = False
+          for file in glob.glob('**/*.md', recursive=True):
+              with open(file, 'r') as f:
+                  text = f.read()
+              score = textstat.flesch_reading_ease(text)
+              grade = textstat.flesch_kincaid_grade(text)
+              
+              print(f'{file}: Reading Ease={score:.1f}, Grade Level={grade:.1f}')
+              
+              if grade > 12:  # Above high school level
+                  print(f'  ⚠️  Warning: Grade level too high ({grade:.1f})')
+                  failed = True
+          
+          if failed:
+              sys.exit(1)
+          "

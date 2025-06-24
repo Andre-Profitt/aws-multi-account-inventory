@@ -1,0 +1,35 @@
+# cfn-nag custom profile
+RulesToSuppress:
+  # Allow certain patterns for development
+  - id: W35
+    reason: S3 bucket access logging is optional for development buckets
+  - id: W41
+    reason: IAM roles without explicit path are acceptable
+  
+# Custom rule configurations
+Rules:
+  # Require encryption for all storage services
+  RequireEncryption:
+    enabled: true
+    services:
+      - S3
+      - RDS
+      - DynamoDB
+      - EBS
+      - EFS
+  
+  # Require specific tags
+  RequiredTags:
+    enabled: true
+    tags:
+      - Environment
+      - Project
+      - Owner
+      - CostCenter
+  
+  # Security group rules
+  SecurityGroups:
+    enabled: true
+    disallow_unrestricted_ingress: true
+    disallow_ssh_from_world: true
+    disallow_rdp_from_world: true

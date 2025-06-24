@@ -1,9 +1,12 @@
 import json
 import os
-import sys
-import boto3
-from datetime import datetime, timezone
 import traceback
+from datetime import timezone
+from datetime import datetime
+
+UTC = timezone.utc
+
+import boto3
 
 from collector.enhanced_main import AWSInventoryCollector
 from query.enhanced_inventory_query import InventoryQuery
@@ -35,7 +38,7 @@ def send_metric(metric_name: str, value: float, unit: str = 'Count'):
                     'MetricName': metric_name,
                     'Value': value,
                     'Unit': unit,
-                    'Timestamp': datetime.now(timezone.utc)
+                    'Timestamp': datetime.now(UTC)
                 }
             ]
         )
@@ -58,27 +61,26 @@ def send_notification(subject: str, message: str):
 
 def lambda_handler(event, context):
     """Enhanced Lambda handler for scheduled collection"""
-    start_time = datetime.now(timezone.utc)
+    start_time = datetime.now(UTC)
     action = event.get('action', 'collect')
-    
+
     # Log invocation
     print(f"Starting inventory {action} at {start_time}")
     print(f"Event: {json.dumps(event)}")
-    
+
     try:
         if action == 'collect':
             return handle_collection(event, context, start_time)
-        elif action == 'cost_analysis':
+        if action == 'cost_analysis':
             return handle_cost_analysis(event, context)
-        elif action == 'security_check':
+        if action == 'security_check':
             return handle_security_check(event, context)
-        elif action == 'cleanup':
+        if action == 'cleanup':
             return handle_cleanup(event, context)
-        else:
-            return {
-                'statusCode': 400,
-                'body': json.dumps({'error': f'Unknown action: {action}'})
-            }
+        return {
+            'statusCode': 400,
+            'body': json.dumps({'error': f'Unknown action: {action}'})
+        }
     except Exception as e:
         handle_error(e, action, context)
         return {
@@ -95,7 +97,7 @@ def handle_collection(event, context, start_time):
     collector = AWSInventoryCollector(
         table_name=os.environ.get('DYNAMODB_TABLE_NAME', 'aws-inventory')
     )
-    
+
     # Load configuration
     config_path = os.environ.get('CONFIG_PATH', '/opt/config/accounts.json')
     if os.path.exists(config_path):
@@ -108,21 +110,21 @@ def handle_collection(event, context, start_time):
             collector.excluded_regions = event.get('excluded_regions', [])
         else:
             raise ValueError("No configuration found")
-    
+
     # Run collection
     inventory = collector.collect_inventory()
-    
+
     # Calculate metrics
-    duration = (datetime.now(timezone.utc) - start_time).total_seconds()
+    duration = (datetime.now(UTC) - start_time).total_seconds()
     resources_collected = len(inventory)
     failed_accounts = len(collector.failed_collections)
-    
+
     # Send metrics to CloudWatch
     send_metric('CollectionDuration', duration, 'Seconds')
     send_metric('ResourcesCollected', resources_collected)
     send_metric('FailedAccounts', failed_accounts)
     send_metric('CollectionSuccess', 1 if failed_accounts == 0 else 0)
-    
+
     # Group resources by type for metrics
     resources_by_type = {}
     total_cost = 0
@@ -130,14 +132,14 @@ def handle_collection(event, context, start_time):
         resource_type = item.get('resource_type', 'unknown')
         resources_by_type[resource_type] = resources_by_type.get(resource_type, 0) + 1
         total_cost += item.get('estimated_monthly_cost', 0)
-        
+
     # Send per-type metrics
     for resource_type, count in resources_by_type.items():
         send_metric(f'Resources_{resource_type}', count)
-    
+
     # Send cost metric
     send_metric('TotalMonthlyCost', total_cost, 'None')
-    
+
     # Log summary
     summary = {
         'duration_seconds': duration,
@@ -147,14 +149,14 @@ def handle_collection(event, context, start_time):
         'total_monthly_cost': total_cost
     }
     print(f"Collection completed: {json.dumps(summary)}")
-    
+
     # Send notification if there were failures
     if failed_accounts > 0:
         failure_details = "\n".join([
             f"- {f['department']} ({f['account_id']}): {f['error']}"
             for f in collector.failed_collections
         ])
-        
+
         send_notification(
             subject=f"AWS Inventory Collection - {failed_accounts} Account(s) Failed",
             message=f"""Inventory collection completed with failures.
@@ -170,12 +172,12 @@ Failed Accounts:
 
 Please check CloudWatch logs for more details."""
         )
-    
+
     # Return success response
     return {
         'statusCode': 200,
         'body': json.dumps({
-            'message': f'Collection completed successfully',
+            'message': 'Collection completed successfully',
             'resources_collected': resources_collected,
             'duration_seconds': duration,
             'failed_accounts': failed_accounts,
@@ -186,32 +188,32 @@ Please check CloudWatch logs for more details."""
 def handle_cost_analysis(event, context):
     """Handle cost analysis and reporting"""
     print("Starting cost analysis")
-    
+
     query = InventoryQuery(
         table_name=os.environ.get('DYNAMODB_TABLE_NAME', 'aws-inventory')
     )
     analysis = query.get_cost_analysis()
-    
+
     # Calculate total monthly cost
     total_cost = analysis.get('total_monthly_cost', 0)
-    
+
     # Send cost metrics
     send_metric('TotalMonthlyCost', total_cost, 'None')
     send_metric('ExpensiveResources', len(analysis.get('top_expensive_resources', [])))
     send_metric('IdleResources', len(analysis.get('idle_resources', [])))
     send_metric('UnencryptedResources', len(analysis.get('unencrypted_resources', [])))
-    
+
     # Check if cost exceeds threshold
     cost_threshold = float(os.environ.get('MONTHLY_COST_THRESHOLD', '10000'))
-    
+
     if total_cost > cost_threshold:
         # Build cost breakdown message
         cost_breakdown = "\n".join([
             f"- {rtype}: ${cost:.2f}"
-            for rtype, cost in sorted(analysis['cost_by_type'].items(), 
+            for rtype, cost in sorted(analysis['cost_by_type'].items(),
                                      key=lambda x: x[1], reverse=True)[:5]
         ])
-        
+
         send_notification(
             subject=f"AWS Cost Alert - Monthly cost ${total_cost:.2f} exceeds threshold",
             message=f"""Monthly AWS costs have exceeded the threshold of ${cost_threshold:.2f}.
@@ -229,12 +231,12 @@ Optimization Opportunities:
 
 Please review the cost analysis dashboard for more details."""
         )
-    
+
     # Generate and save cost report
     report_bucket = os.environ.get('REPORT_BUCKET')
     if report_bucket:
-        report_key = f"cost-reports/{datetime.now(timezone.utc).strftime('%Y/%m/%d')}/cost_analysis.json"
-        
+        report_key = f"cost-reports/{datetime.now(UTC).strftime('%Y/%m/%d')}/cost_analysis.json"
+
         _, _, s3 = get_clients()
         s3.put_object(
             Bucket=report_bucket,
@@ -242,9 +244,9 @@ Please review the cost analysis dashboard for more details."""
             Body=json.dumps(analysis, default=str),
             ContentType='application/json'
         )
-        
+
         print(f"Cost analysis completed. Report saved to s3://{report_bucket}/{report_key}")
-    
+
     return {
         'statusCode': 200,
         'body': json.dumps({
@@ -257,40 +259,40 @@ Please review the cost analysis dashboard for more details."""
 def handle_security_check(event, context):
     """Handle security compliance check"""
     print("Starting security compliance check")
-    
+
     query = InventoryQuery(
         table_name=os.environ.get('DYNAMODB_TABLE_NAME', 'aws-inventory')
     )
     analysis = query.get_cost_analysis()
-    
+
     # Count security issues
     unencrypted_count = len(analysis['unencrypted_resources'])
     public_count = len(analysis['public_resources'])
     total_issues = unencrypted_count + public_count
-    
+
     # Send metrics
     send_metric('UnencryptedResources', unencrypted_count)
     send_metric('PublicResources', public_count)
     send_metric('SecurityIssues', total_issues)
-    
+
     if total_issues > 0:
         # Build security issues message
         issues_message = []
-        
+
         if unencrypted_count > 0:
             issues_message.append(f"\nUnencrypted Resources ({unencrypted_count}):")
             for r in analysis['unencrypted_resources'][:10]:
                 issues_message.append(f"- {r['resource_id']} ({r['type']}) in {r['department']}")
             if unencrypted_count > 10:
                 issues_message.append(f"... and {unencrypted_count - 10} more")
-        
+
         if public_count > 0:
             issues_message.append(f"\nPublic Resources ({public_count}):")
             for r in analysis['public_resources'][:10]:
                 issues_message.append(f"- {r['resource_id']} ({r['type']}) in {r['department']}")
             if public_count > 10:
                 issues_message.append(f"... and {public_count - 10} more")
-        
+
         send_notification(
             subject=f"AWS Security Alert - {total_issues} compliance issues found",
             message=f"""Security compliance check found {total_issues} issues requiring attention.
@@ -304,19 +306,19 @@ Issues Found:
 
 Please review these resources and apply appropriate security measures."""
         )
-    
+
     # Save security report
     report_bucket = os.environ.get('REPORT_BUCKET')
     if report_bucket:
-        report_key = f"security-reports/{datetime.now(timezone.utc).strftime('%Y/%m/%d')}/security_check.json"
-        
+        report_key = f"security-reports/{datetime.now(UTC).strftime('%Y/%m/%d')}/security_check.json"
+
         security_report = {
-            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'timestamp': datetime.now(UTC).isoformat(),
             'total_issues': total_issues,
             'unencrypted_resources': analysis['unencrypted_resources'],
             'public_resources': analysis['public_resources']
         }
-        
+
         _, _, s3 = get_clients()
         s3.put_object(
             Bucket=report_bucket,
@@ -324,7 +326,7 @@ Please review these resources and apply appropriate security measures."""
             Body=json.dumps(security_report, default=str),
             ContentType='application/json'
         )
-    
+
     return {
         'statusCode': 200,
         'body': json.dumps({
@@ -338,29 +340,29 @@ Please review these resources and apply appropriate security measures."""
 def handle_cleanup(event, context):
     """Handle stale resource cleanup"""
     print("Starting stale resource check")
-    
+
     query = InventoryQuery(
         table_name=os.environ.get('DYNAMODB_TABLE_NAME', 'aws-inventory')
     )
-    
+
     days = event.get('days', 90)
     stale_resources = query.get_stale_resources(days)
-    
+
     # Send metrics
     send_metric('StaleResources', len(stale_resources))
-    
+
     if stale_resources:
         # Group by type
         stale_by_type = {}
         for r in stale_resources:
             rtype = r['resource_type']
             stale_by_type[rtype] = stale_by_type.get(rtype, 0) + 1
-        
+
         breakdown = "\n".join([
             f"- {rtype}: {count}"
             for rtype, count in sorted(stale_by_type.items(), key=lambda x: x[1], reverse=True)
         ])
-        
+
         send_notification(
             subject=f"AWS Cleanup Alert - {len(stale_resources)} stale resources found",
             message=f"""Found {len(stale_resources)} resources that haven't been modified in over {days} days.
@@ -373,7 +375,7 @@ Top Stale Resources:
 
 Consider reviewing these resources for potential cleanup."""
         )
-    
+
     return {
         'statusCode': 200,
         'body': json.dumps({
@@ -387,11 +389,11 @@ def handle_error(error, action, context):
     """Handle and report errors"""
     error_message = f"{action} failed: {str(error)}\n{traceback.format_exc()}"
     print(error_message)
-    
+
     # Send failure metric
     send_metric('CollectionSuccess', 0)
     send_metric('CollectionErrors', 1)
-    
+
     # Send notification
     send_notification(
         subject=f"AWS Inventory {action.title()} Failed",

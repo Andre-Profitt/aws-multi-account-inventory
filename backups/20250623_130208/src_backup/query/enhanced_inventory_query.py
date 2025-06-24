@@ -1,57 +1,59 @@
 #!/usr/bin/env python3
 """Enhanced AWS Inventory Query Tool with cost analysis and advanced filtering"""
 
+import json
+from collections import defaultdict
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
+from decimal import Decimal
+from typing import Any
+
 import boto3
 import click
-import json
-import csv
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any
-from collections import defaultdict
-from decimal import Decimal
 import pandas as pd
 from tabulate import tabulate
 
 
 class InventoryQuery:
     """Query tool for AWS inventory data with cost analysis capabilities"""
-    
+
     def __init__(self, table_name: str = 'aws-inventory'):
         self.dynamodb = boto3.resource('dynamodb')
         self.table = self.dynamodb.Table(table_name)
-    
+
     def _decimal_to_float(self, obj):
         """Convert DynamoDB Decimal types to float for JSON serialization"""
         if isinstance(obj, Decimal):
             return float(obj)
-        elif isinstance(obj, dict):
+        if isinstance(obj, dict):
             return {k: self._decimal_to_float(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
+        if isinstance(obj, list):
             return [self._decimal_to_float(v) for v in obj]
         return obj
-    
-    def get_all_items(self, filter_expression=None) -> List[Dict]:
+
+    def get_all_items(self, filter_expression=None) -> list[dict]:
         """Get all items from DynamoDB with optional filter"""
         items = []
-        
+
         scan_kwargs = {}
         if filter_expression:
             scan_kwargs['FilterExpression'] = filter_expression
-        
+
         response = self.table.scan(**scan_kwargs)
         items.extend(response['Items'])
-        
+
         while 'LastEvaluatedKey' in response:
             scan_kwargs['ExclusiveStartKey'] = response['LastEvaluatedKey']
             response = self.table.scan(**scan_kwargs)
             items.extend(response['Items'])
-        
+
         return [self._decimal_to_float(item) for item in items]
-    
-    def get_summary(self) -> Dict[str, Any]:
+
+    def get_summary(self) -> dict[str, Any]:
         """Get inventory summary with cost analysis"""
         items = self.get_all_items()
-        
+
         summary = {
             'total_resources': len(items),
             'by_type': defaultdict(int),
@@ -61,24 +63,24 @@ class InventoryQuery:
             'cost_by_type': defaultdict(float),
             'cost_by_account': defaultdict(float),
             'cost_by_region': defaultdict(float),
-            'timestamp': datetime.now(timezone.utc).isoformat()
+            'timestamp': datetime.now(UTC).isoformat()
         }
-        
+
         for item in items:
             resource_type = item.get('resource_type', 'unknown')
             account_name = item.get('account_name', 'unknown')
             region = item.get('region', 'unknown')
             monthly_cost = item.get('estimated_monthly_cost', 0)
-            
+
             summary['by_type'][resource_type] += 1
             summary['by_account'][account_name] += 1
             summary['by_region'][region] += 1
-            
+
             summary['total_monthly_cost'] += monthly_cost
             summary['cost_by_type'][resource_type] += monthly_cost
             summary['cost_by_account'][account_name] += monthly_cost
             summary['cost_by_region'][region] += monthly_cost
-        
+
         # Convert defaultdicts to regular dicts for JSON serialization
         summary['by_type'] = dict(summary['by_type'])
         summary['by_account'] = dict(summary['by_account'])
@@ -86,13 +88,13 @@ class InventoryQuery:
         summary['cost_by_type'] = dict(summary['cost_by_type'])
         summary['cost_by_account'] = dict(summary['cost_by_account'])
         summary['cost_by_region'] = dict(summary['cost_by_region'])
-        
+
         return summary
-    
-    def get_cost_analysis(self) -> Dict[str, Any]:
+
+    def get_cost_analysis(self) -> dict[str, Any]:
         """Perform detailed cost analysis with optimization recommendations"""
         items = self.get_all_items()
-        
+
         analysis = {
             'total_monthly_cost': 0,
             'yearly_projection': 0,
@@ -103,14 +105,14 @@ class InventoryQuery:
             'unencrypted_resources': [],
             'public_resources': []
         }
-        
+
         # Calculate costs and identify issues
         resources_with_cost = []
-        
+
         for item in items:
             monthly_cost = item.get('estimated_monthly_cost', 0)
             analysis['total_monthly_cost'] += monthly_cost
-            
+
             if monthly_cost > 0:
                 resources_with_cost.append({
                     'resource_id': item.get('resource_id'),
@@ -120,11 +122,11 @@ class InventoryQuery:
                     'monthly_cost': monthly_cost,
                     'attributes': item.get('attributes', {})
                 })
-            
+
             # Check for optimization opportunities
             attrs = item.get('attributes', {})
             resource_type = item.get('resource_type', '')
-            
+
             # Idle EC2 instances
             if resource_type == 'ec2_instance':
                 state = attrs.get('state', '')
@@ -132,7 +134,7 @@ class InventoryQuery:
                     launch_time = attrs.get('launch_time', '')
                     if launch_time:
                         launch_date = datetime.fromisoformat(launch_time.replace('Z', '+00:00'))
-                        days_stopped = (datetime.now(timezone.utc) - launch_date).days
+                        days_stopped = (datetime.now(UTC) - launch_date).days
                         if days_stopped > 30:
                             analysis['idle_resources'].append({
                                 'resource_id': item.get('resource_id'),
@@ -141,7 +143,7 @@ class InventoryQuery:
                                 'recommendation': 'Consider terminating or creating an AMI',
                                 'potential_savings': 0  # No cost for stopped instances
                             })
-                
+
                 # Oversized instances (simple heuristic)
                 instance_type = attrs.get('instance_type', '')
                 if instance_type.startswith(('m5.2xlarge', 'm5.4xlarge', 'm5.8xlarge')):
@@ -152,7 +154,7 @@ class InventoryQuery:
                         'recommendation': 'Review CPU/memory utilization, consider downsizing',
                         'potential_savings': monthly_cost * 0.3  # Assume 30% savings
                     })
-            
+
             # Unencrypted RDS instances
             if resource_type == 'rds_instance':
                 if not attrs.get('storage_encrypted', False):
@@ -162,7 +164,7 @@ class InventoryQuery:
                         'issue': 'Storage not encrypted',
                         'recommendation': 'Enable encryption for compliance'
                     })
-            
+
             # Unencrypted S3 buckets
             if resource_type == 's3_bucket':
                 if not attrs.get('encryption', False):
@@ -172,7 +174,7 @@ class InventoryQuery:
                         'issue': 'Bucket not encrypted',
                         'recommendation': 'Enable default encryption'
                     })
-                
+
                 # Public S3 buckets
                 if attrs.get('public_access', False):
                     analysis['public_resources'].append({
@@ -181,7 +183,7 @@ class InventoryQuery:
                         'issue': 'Public access enabled',
                         'recommendation': 'Review and restrict public access'
                     })
-            
+
             # Low-utilization Lambda functions
             if resource_type == 'lambda_function':
                 invocations = attrs.get('invocations_monthly', 0)
@@ -193,52 +195,52 @@ class InventoryQuery:
                         'recommendation': 'Consider removing unused function',
                         'potential_savings': monthly_cost
                     })
-        
+
         # Sort and get top expensive resources
         resources_with_cost.sort(key=lambda x: x['monthly_cost'], reverse=True)
         analysis['top_expensive_resources'] = resources_with_cost[:20]
-        
+
         # Calculate yearly projection
         analysis['yearly_projection'] = analysis['total_monthly_cost'] * 12
-        
+
         # Calculate total potential savings
         total_savings = sum(r.get('potential_savings', 0) for r in analysis['idle_resources'])
         total_savings += sum(r.get('potential_savings', 0) for r in analysis['oversized_resources'])
-        
+
         analysis['total_potential_savings'] = total_savings
         analysis['yearly_potential_savings'] = total_savings * 12
-        
+
         return analysis
-    
-    def get_resources_by_filter(self, account_id: Optional[str] = None,
-                               resource_type: Optional[str] = None,
-                               region: Optional[str] = None,
-                               days: Optional[int] = None) -> List[Dict]:
+
+    def get_resources_by_filter(self, account_id: str | None = None,
+                               resource_type: str | None = None,
+                               region: str | None = None,
+                               days: int | None = None) -> list[dict]:
         """Get resources with multiple filter options"""
         filter_parts = []
         expression_values = {}
-        
+
         if account_id:
             filter_parts.append('account_id = :account_id')
             expression_values[':account_id'] = account_id
-        
+
         if resource_type:
             filter_parts.append('resource_type = :resource_type')
             expression_values[':resource_type'] = resource_type
-        
+
         if region:
             filter_parts.append('region = :region')
             expression_values[':region'] = region
-        
+
         if days:
-            cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            cutoff_date = (datetime.now(UTC) - timedelta(days=days)).isoformat()
             filter_parts.append('timestamp > :cutoff')
             expression_values[':cutoff'] = cutoff_date
-        
+
         if filter_parts:
             from boto3.dynamodb.conditions import Attr
             filter_expression = None
-            
+
             # Build filter expression dynamically
             for part in filter_parts:
                 if 'account_id' in part:
@@ -249,22 +251,22 @@ class InventoryQuery:
                     expr = Attr('region').eq(expression_values[':region'])
                 elif 'timestamp' in part:
                     expr = Attr('timestamp').gt(expression_values[':cutoff'])
-                
+
                 filter_expression = expr if filter_expression is None else filter_expression & expr
-            
+
             return self.get_all_items(filter_expression)
-        
+
         return self.get_all_items()
-    
-    def export_to_csv(self, filename: str, resources: List[Dict]):
+
+    def export_to_csv(self, filename: str, resources: list[dict]):
         """Export resources to CSV file"""
         if not resources:
             click.echo("No resources to export")
             return
-        
+
         # Flatten the data for CSV export
         flattened_data = []
-        
+
         for resource in resources:
             flat_resource = {
                 'resource_type': resource.get('resource_type'),
@@ -275,7 +277,7 @@ class InventoryQuery:
                 'timestamp': resource.get('timestamp'),
                 'estimated_monthly_cost': resource.get('estimated_monthly_cost', 0)
             }
-            
+
             # Add selected attributes
             attrs = resource.get('attributes', {})
             if resource.get('resource_type') == 'ec2_instance':
@@ -306,35 +308,35 @@ class InventoryQuery:
                     'memory_size': attrs.get('memory_size'),
                     'invocations_monthly': attrs.get('invocations_monthly')
                 })
-            
+
             # Add tags
             tags = attrs.get('tags', {})
             flat_resource['department'] = tags.get('Department', '')
             flat_resource['environment'] = tags.get('Environment', '')
             flat_resource['owner'] = tags.get('Owner', '')
-            
+
             flattened_data.append(flat_resource)
-        
+
         # Create DataFrame and export to CSV
         df = pd.DataFrame(flattened_data)
         df.to_csv(filename, index=False)
-        
+
         click.echo(f"Exported {len(resources)} resources to {filename}")
-    
-    def get_stale_resources(self, days: int = 90) -> List[Dict]:
+
+    def get_stale_resources(self, days: int = 90) -> list[dict]:
         """Find resources that haven't been used in specified days"""
         items = self.get_all_items()
         stale_resources = []
-        
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-        
+
+        cutoff_date = datetime.now(UTC) - timedelta(days=days)
+
         for item in items:
             attrs = item.get('attributes', {})
             resource_type = item.get('resource_type', '')
-            
+
             is_stale = False
             stale_reason = ''
-            
+
             if resource_type == 'ec2_instance':
                 # Check if stopped for too long
                 if attrs.get('state') == 'stopped':
@@ -344,14 +346,14 @@ class InventoryQuery:
                         if launch_date < cutoff_date:
                             is_stale = True
                             stale_reason = f"Stopped since {launch_time}"
-            
+
             elif resource_type == 'lambda_function':
                 # Check invocation count
                 invocations = attrs.get('invocations_monthly', 0)
                 if invocations == 0:
                     is_stale = True
                     stale_reason = "No invocations in last month"
-            
+
             elif resource_type == 's3_bucket':
                 # Check if empty bucket
                 size_bytes = attrs.get('size_bytes', 0)
@@ -361,7 +363,7 @@ class InventoryQuery:
                     if create_date < cutoff_date:
                         is_stale = True
                         stale_reason = f"Empty bucket created on {creation_date}"
-            
+
             if is_stale:
                 stale_resources.append({
                     'resource_type': resource_type,
@@ -372,14 +374,14 @@ class InventoryQuery:
                     'monthly_cost': item.get('estimated_monthly_cost', 0),
                     'attributes': attrs
                 })
-        
+
         return stale_resources
 
 
 @click.command()
 @click.option('--table', default='aws-inventory', help='DynamoDB table name')
 @click.option('--action', type=click.Choice([
-    'summary', 'by-account', 'by-type', 'by-region', 'recent', 
+    'summary', 'by-account', 'by-type', 'by-region', 'recent',
     'export', 'details', 'cost', 'stale', 'security'
 ]), default='summary', help='Query action to perform')
 @click.option('--account-id', help='Filter by account ID')
@@ -390,19 +392,19 @@ class InventoryQuery:
 @click.option('--hours', type=int, help='Show resources from last N hours')
 @click.option('--days', type=int, help='Show resources from last N days')
 @click.option('--output', help='Output filename for export')
-@click.option('--format', type=click.Choice(['json', 'csv', 'table']), default='table', 
+@click.option('--format', type=click.Choice(['json', 'csv', 'table']), default='table',
               help='Output format')
 @click.option('--department', help='Filter by Department tag')
 @click.option('--environment', help='Filter by Environment tag')
-def main(table, action, account_id, account_name, resource_type, resource_id, 
+def main(table, action, account_id, account_name, resource_type, resource_id,
          region, hours, days, output, format, department, environment):
     """Enhanced AWS Inventory Query Tool"""
-    
+
     query = InventoryQuery(table_name=table)
-    
+
     if action == 'summary':
         summary = query.get_summary()
-        
+
         if format == 'json':
             click.echo(json.dumps(summary, indent=2, default=str))
         else:
@@ -410,26 +412,26 @@ def main(table, action, account_id, account_name, resource_type, resource_id,
             click.echo(f"Total Resources: {summary['total_resources']}")
             click.echo(f"Total Monthly Cost: ${summary['total_monthly_cost']:,.2f}")
             click.echo(f"Yearly Projection: ${summary['total_monthly_cost'] * 12:,.2f}")
-            
+
             click.echo("\n--- Resources by Type ---")
             for rtype, count in sorted(summary['by_type'].items()):
                 cost = summary['cost_by_type'].get(rtype, 0)
                 click.echo(f"{rtype}: {count} (${cost:,.2f}/month)")
-            
+
             click.echo("\n--- Resources by Account ---")
             for account, count in sorted(summary['by_account'].items()):
                 cost = summary['cost_by_account'].get(account, 0)
                 click.echo(f"{account}: {count} (${cost:,.2f}/month)")
-            
+
             click.echo("\n--- Top Regions by Cost ---")
-            sorted_regions = sorted(summary['cost_by_region'].items(), 
+            sorted_regions = sorted(summary['cost_by_region'].items(),
                                   key=lambda x: x[1], reverse=True)[:5]
             for region, cost in sorted_regions:
                 click.echo(f"{region}: ${cost:,.2f}/month")
-    
+
     elif action == 'cost':
         analysis = query.get_cost_analysis()
-        
+
         if format == 'json':
             click.echo(json.dumps(analysis, indent=2, default=str))
         else:
@@ -438,13 +440,13 @@ def main(table, action, account_id, account_name, resource_type, resource_id,
             click.echo(f"Yearly Projection: ${analysis['yearly_projection']:,.2f}")
             click.echo(f"Potential Monthly Savings: ${analysis['total_potential_savings']:,.2f}")
             click.echo(f"Potential Yearly Savings: ${analysis['yearly_potential_savings']:,.2f}")
-            
+
             click.echo("\n--- Top 10 Most Expensive Resources ---")
             for i, resource in enumerate(analysis['top_expensive_resources'][:10], 1):
                 click.echo(f"{i}. {resource['resource_type']} - {resource['resource_id']}")
                 click.echo(f"   Account: {resource['account_name']}, Region: {resource['region']}")
                 click.echo(f"   Cost: ${resource['monthly_cost']:,.2f}/month")
-            
+
             if analysis['idle_resources']:
                 click.echo(f"\n--- Idle Resources ({len(analysis['idle_resources'])}) ---")
                 for resource in analysis['idle_resources'][:5]:
@@ -453,7 +455,7 @@ def main(table, action, account_id, account_name, resource_type, resource_id,
                     click.echo(f"  Recommendation: {resource['recommendation']}")
                     if resource.get('potential_savings'):
                         click.echo(f"  Potential Savings: ${resource['potential_savings']:,.2f}/month")
-            
+
             if analysis['oversized_resources']:
                 click.echo(f"\n--- Potentially Oversized Resources ({len(analysis['oversized_resources'])}) ---")
                 for resource in analysis['oversized_resources'][:5]:
@@ -461,45 +463,45 @@ def main(table, action, account_id, account_name, resource_type, resource_id,
                     click.echo(f"  Current: {resource['current_type']}")
                     click.echo(f"  Recommendation: {resource['recommendation']}")
                     click.echo(f"  Potential Savings: ${resource['potential_savings']:,.2f}/month")
-    
+
     elif action == 'security':
         analysis = query.get_cost_analysis()
-        
+
         click.echo("\n=== Security Analysis Report ===")
-        
+
         if analysis['unencrypted_resources']:
             click.echo(f"\n--- Unencrypted Resources ({len(analysis['unencrypted_resources'])}) ---")
             for resource in analysis['unencrypted_resources']:
                 click.echo(f"• {resource['type']} - {resource['resource_id']}")
                 click.echo(f"  Issue: {resource['issue']}")
                 click.echo(f"  Recommendation: {resource['recommendation']}")
-        
+
         if analysis['public_resources']:
             click.echo(f"\n--- Public Resources ({len(analysis['public_resources'])}) ---")
             for resource in analysis['public_resources']:
                 click.echo(f"• {resource['type']} - {resource['resource_id']}")
                 click.echo(f"  Issue: {resource['issue']}")
                 click.echo(f"  Recommendation: {resource['recommendation']}")
-    
+
     elif action == 'stale':
         stale_days = days or 90
         stale_resources = query.get_stale_resources(stale_days)
-        
+
         if format == 'json':
             click.echo(json.dumps(stale_resources, indent=2, default=str))
         else:
             click.echo(f"\n=== Stale Resources (>{stale_days} days) ===")
             click.echo(f"Found {len(stale_resources)} stale resources")
-            
+
             total_cost = sum(r['monthly_cost'] for r in stale_resources)
             click.echo(f"Total monthly cost of stale resources: ${total_cost:,.2f}")
-            
+
             for resource in stale_resources[:20]:
                 click.echo(f"\n• {resource['resource_type']} - {resource['resource_id']}")
                 click.echo(f"  Account: {resource['account_name']}, Region: {resource['region']}")
                 click.echo(f"  Reason: {resource['reason']}")
                 click.echo(f"  Monthly Cost: ${resource['monthly_cost']:,.2f}")
-    
+
     elif action == 'export':
         # Build filters
         resources = query.get_resources_by_filter(
@@ -508,7 +510,7 @@ def main(table, action, account_id, account_name, resource_type, resource_id,
             region=region,
             days=days
         )
-        
+
         # Apply tag filters if specified
         if department or environment:
             filtered_resources = []
@@ -520,7 +522,7 @@ def main(table, action, account_id, account_name, resource_type, resource_id,
                     continue
                 filtered_resources.append(resource)
             resources = filtered_resources
-        
+
         if output:
             if output.endswith('.csv'):
                 query.export_to_csv(output, resources)
@@ -530,39 +532,39 @@ def main(table, action, account_id, account_name, resource_type, resource_id,
                 click.echo(f"Exported {len(resources)} resources to {output}")
         else:
             click.echo(json.dumps(resources, indent=2, default=str))
-    
+
     elif action == 'details':
         if not resource_id:
             click.echo("Error: --resource-id required for details action")
             return
-        
+
         # Find the resource
         items = query.get_all_items()
         resource = None
-        
+
         for item in items:
             if item.get('resource_id') == resource_id:
                 resource = item
                 break
-        
+
         if resource:
             if format == 'json':
                 click.echo(json.dumps(resource, indent=2, default=str))
             else:
-                click.echo(f"\n=== Resource Details ===")
+                click.echo("\n=== Resource Details ===")
                 click.echo(f"Type: {resource.get('resource_type')}")
                 click.echo(f"ID: {resource.get('resource_id')}")
                 click.echo(f"Account: {resource.get('account_name')} ({resource.get('account_id')})")
                 click.echo(f"Region: {resource.get('region')}")
                 click.echo(f"Last Updated: {resource.get('timestamp')}")
                 click.echo(f"Monthly Cost: ${resource.get('estimated_monthly_cost', 0):,.2f}")
-                
+
                 click.echo("\n--- Attributes ---")
                 attrs = resource.get('attributes', {})
                 for key, value in attrs.items():
                     if key != 'tags':
                         click.echo(f"{key}: {value}")
-                
+
                 tags = attrs.get('tags', {})
                 if tags:
                     click.echo("\n--- Tags ---")
@@ -570,7 +572,7 @@ def main(table, action, account_id, account_name, resource_type, resource_id,
                         click.echo(f"{key}: {value}")
         else:
             click.echo(f"Resource not found: {resource_id}")
-    
+
     else:
         # Handle by-account, by-type, by-region, recent
         resources = query.get_resources_by_filter(
@@ -579,20 +581,20 @@ def main(table, action, account_id, account_name, resource_type, resource_id,
             region=region,
             days=days
         )
-        
+
         if hours:
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-            resources = [r for r in resources 
+            cutoff = datetime.now(UTC) - timedelta(hours=hours)
+            resources = [r for r in resources
                         if datetime.fromisoformat(r['timestamp'].replace('Z', '+00:00')) > cutoff]
-        
+
         if action == 'by-account' and account_name:
             resources = [r for r in resources if r.get('account_name') == account_name]
-        
+
         if format == 'json':
             click.echo(json.dumps(resources, indent=2, default=str))
         else:
             click.echo(f"\nFound {len(resources)} resources")
-            
+
             if resources:
                 # Create summary table
                 table_data = []
@@ -604,10 +606,10 @@ def main(table, action, account_id, account_name, resource_type, resource_id,
                         r.get('region'),
                         f"${r.get('estimated_monthly_cost', 0):,.2f}"
                     ])
-                
+
                 headers = ['Type', 'Resource ID', 'Account', 'Region', 'Monthly Cost']
                 click.echo(tabulate(table_data, headers=headers, tablefmt='grid'))
-                
+
                 if len(resources) > 50:
                     click.echo(f"\n... and {len(resources) - 50} more resources")
 

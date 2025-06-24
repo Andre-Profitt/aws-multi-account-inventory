@@ -1,0 +1,86 @@
+name: Performance and Cost Analysis
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly on Sunday
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  lambda-analysis:
+    name: Lambda Performance Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_AUDIT_ROLE_ARN }}
+          aws-region: us-east-1
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install Dependencies
+        run: |
+          pip install boto3 pandas matplotlib
+      
+      - name: Run Lambda Analysis
+        run: python audit/scripts/lambda-power-tune.py
+      
+      - name: Upload Performance Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: lambda-performance-report
+          path: audit/reports/lambda-performance-*.html
+
+  cost-analysis:
+    name: Cost Optimization Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_AUDIT_ROLE_ARN }}
+          aws-region: us-east-1
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install Dependencies
+        run: |
+          pip install boto3 pandas
+      
+      - name: Run Cost Analysis
+        run: python audit/scripts/cost-analyzer.py
+      
+      - name: Generate Cost Report
+        id: cost-report
+        run: |
+          echo "## 💰 Weekly Cost Analysis Report" > cost-summary.md
+          python audit/scripts/generate-cost-summary.py >> cost-summary.md
+      
+      - name: Create Issue with Report
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('cost-summary.md', 'utf8');
+            
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Cost Analysis Report - ${new Date().toISOString().split('T')[0]}`,
+              body: report,
+              labels: ['cost-analysis', 'automated']
+            });

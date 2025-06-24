@@ -1,0 +1,45 @@
+# Markdownlint configuration
+default: true
+
+# Heading style
+MD003:
+  style: "atx"
+
+# Line length
+MD013:
+  line_length: 120
+  code_block_line_length: 120
+  tables: false
+
+# Allow inline HTML
+MD033: false
+
+# Allow bare URLs
+MD034: false
+
+# Blank lines
+MD012:
+  maximum: 2
+
+# Code block style
+MD046:
+  style: "fenced"
+
+# Emphasis style
+MD049:
+  style: "underscore"
+
+# Strong style
+MD050:
+  style: "asterisk"
+
+# Lists
+MD004:
+  style: "dash"
+
+MD007:
+  indent: 2
+
+# Allow duplicate headings
+MD024:
+  siblings_only: true

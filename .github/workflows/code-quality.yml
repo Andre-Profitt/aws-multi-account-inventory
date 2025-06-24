@@ -1,0 +1,92 @@
+name: Code Quality Check
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ruff:
+    name: Python Linting and Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Cache pip packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
+      - name: Install Ruff
+        run: pip install ruff
+      
+      - name: Run Ruff Linter
+        run: ruff check . --output-format=github
+      
+      - name: Run Ruff Formatter
+        run: ruff format --check .
+
+  dead-code:
+    name: Dead Code Detection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install Vulture
+        run: pip install vulture
+      
+      - name: Run Vulture
+        run: vulture . --min-confidence 80 --exclude "tests/,venv/,build/"
+      
+      - name: Upload Dead Code Report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: dead-code-report
+          path: dead_code_report.txt
+
+  duplication:
+    name: Code Duplication Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install PMD
+        run: |
+          wget https://github.com/pmd/pmd/releases/download/pmd_releases%2F6.55.0/pmd-bin-6.55.0.zip
+          unzip pmd-bin-6.55.0.zip
+      
+      - name: Run CPD
+        run: |
+          pmd-bin-6.55.0/bin/run.sh cpd \
+            --minimum-tokens 100 \
+            --language python \
+            --files . \
+            --exclude "tests/,venv/,build/" \
+            --format xml > cpd-report.xml
+      
+      - name: Upload Duplication Report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: duplication-report
+          path: cpd-report.xml

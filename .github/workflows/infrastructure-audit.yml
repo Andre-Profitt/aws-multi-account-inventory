@@ -1,0 +1,80 @@
+name: Infrastructure Audit
+
+on:
+  pull_request:
+    paths:
+      - '**/*.yaml'
+      - '**/*.yml'
+      - '**/*.json'
+      - '**/*.tf'
+      - 'cloudformation/**'
+      - 'terraform/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  cfn-nag:
+    name: CloudFormation Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.0'
+      
+      - name: Install cfn-nag
+        run: gem install cfn-nag
+      
+      - name: Run cfn-nag
+        run: |
+          cfn_nag_scan \
+            --input-path cloudformation/ \
+            --output-format json \
+            --profile-path audit/configs/cfn-nag-profile.yml \
+            > cfn-nag-report.json || true
+      
+      - name: Comment Results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('cfn-nag-report.json', 'utf8'));
+            let comment = '## 🏗️ CloudFormation Security Scan\n\n';
+            
+            if (report.failure_count === 0) {
+              comment += '✅ No security issues found!';
+            } else {
+              comment += `⚠️ Found ${report.failure_count} issues:\n\n`;
+              // Add issue details
+            }
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+  tfsec:
+    name: Terraform Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.0
+        with:
+          config_file: audit/configs/tfsec-config.yml
+          format: json
+          out: tfsec-results.json
+      
+      - name: Upload tfsec results
+        uses: actions/upload-artifact@v3
+        with:
+          name: tfsec-results
+          path: tfsec-results.json

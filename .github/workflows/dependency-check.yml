@@ -1,0 +1,122 @@
+name: Dependency Check
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly on Monday at 6 AM
+  push:
+    paths:
+      - 'requirements*.txt'
+      - 'requirements*.in'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  pip-audit:
+    name: Python Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install pip-audit
+        run: pip install pip-audit
+      
+      - name: Run pip-audit
+        run: |
+          pip-audit -r requirements.txt --format json > pip-audit-report.json || true
+      
+      - name: Parse Results
+        id: audit-results
+        run: |
+          python -c "
+          import json
+          with open('pip-audit-report.json', 'r') as f:
+              report = json.load(f)
+          vulnerabilities = len(report.get('vulnerabilities', []))
+          print(f'Found {vulnerabilities} vulnerabilities')
+          if vulnerabilities > 0:
+              print('::warning::Vulnerable dependencies detected')
+          "
+      
+      - name: Create Issue if Vulnerabilities Found
+        if: steps.audit-results.outputs.vulnerabilities > 0
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('pip-audit-report.json', 'utf8'));
+            
+            let issueBody = '## 🚨 Dependency Vulnerabilities Found\n\n';
+            issueBody += `Total vulnerabilities: ${report.vulnerabilities.length}\n\n`;
+            
+            report.vulnerabilities.forEach(vuln => {
+              issueBody += `### ${vuln.name}\n`;
+              issueBody += `- **Version**: ${vuln.version}\n`;
+              issueBody += `- **Vulnerability**: ${vuln.id}\n`;
+              issueBody += `- **Description**: ${vuln.description}\n`;
+              issueBody += `- **Fix**: Upgrade to ${vuln.fix_versions.join(', ')}\n\n`;
+            });
+            
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Security: ${report.vulnerabilities.length} vulnerable dependencies found`,
+              body: issueBody,
+              labels: ['security', 'dependencies', 'automated']
+            });
+
+  license-check:
+    name: License Compatibility Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install pip-licenses
+        run: pip install pip-licenses
+      
+      - name: Check Licenses
+        run: |
+          pip install -r requirements.txt
+          pip-licenses --format=json --with-urls --with-description > licenses.json
+      
+      - name: Verify License Compatibility
+        run: |
+          python -c "
+          import json
+          
+          # Approved licenses
+          approved_licenses = [
+              'MIT', 'Apache 2.0', 'Apache Software License',
+              'BSD', 'BSD-3-Clause', 'BSD-2-Clause',
+              'ISC', 'Python Software Foundation License',
+              'GNU LGPL', 'Public Domain'
+          ]
+          
+          with open('licenses.json', 'r') as f:
+              licenses = json.load(f)
+          
+          incompatible = []
+          for pkg in licenses:
+              license = pkg.get('License', 'Unknown')
+              if not any(approved in license for approved in approved_licenses):
+                  incompatible.append(f\"{pkg['Name']}: {license}\")
+          
+          if incompatible:
+              print('::warning::Found packages with potentially incompatible licenses:')
+              for pkg in incompatible:
+                  print(f'  - {pkg}')
+          else:
+              print('All package licenses are compatible!')
+          "

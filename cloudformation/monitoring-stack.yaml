@@ -1,0 +1,162 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Monitoring and Alerting Stack for AWS Multi-Account Inventory
+
+Parameters:
+  SNSTopicEmail:
+    Type: String
+    Description: Email address for alerts
+  
+  LambdaFunctionName:
+    Type: String
+    Description: Name of the Lambda function to monitor
+
+Resources:
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: aws-inventory-alerts
+      Subscription:
+        - Endpoint: !Ref SNSTopicEmail
+          Protocol: email
+
+  LambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${LambdaFunctionName}-errors
+      AlarmDescription: Lambda function error rate too high
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref LambdaFunctionName
+      AlarmActions:
+        - !Ref AlertTopic
+      TreatMissingData: notBreaching
+
+  LambdaThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${LambdaFunctionName}-throttles
+      AlarmDescription: Lambda function being throttled
+      MetricName: Throttles
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref LambdaFunctionName
+      AlarmActions:
+        - !Ref AlertTopic
+      TreatMissingData: notBreaching
+
+  LambdaDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${LambdaFunctionName}-duration
+      AlarmDescription: Lambda function duration too high
+      MetricName: Duration
+      Namespace: AWS/Lambda
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 3000  # 3 seconds
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref LambdaFunctionName
+      AlarmActions:
+        - !Ref AlertTopic
+      TreatMissingData: notBreaching
+
+  LambdaConcurrentExecutionsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${LambdaFunctionName}-concurrent-executions
+      AlarmDescription: Lambda concurrent executions approaching limit
+      MetricName: ConcurrentExecutions
+      Namespace: AWS/Lambda
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 900  # Assuming 1000 limit
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref LambdaFunctionName
+      AlarmActions:
+        - !Ref AlertTopic
+      TreatMissingData: notBreaching
+
+  # Custom Metric Alarms
+  ErrorRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${LambdaFunctionName}-error-rate
+      AlarmDescription: Lambda error rate exceeds 1%
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 2
+      Threshold: 1
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+      Metrics:
+        - Id: error_rate
+          Expression: "(errors / invocations) * 100"
+        - Id: errors
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: Errors
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Ref LambdaFunctionName
+            Period: 300
+            Stat: Sum
+          ReturnData: false
+        - Id: invocations
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: Invocations
+              Dimensions:
+                - Name: FunctionName
+                  Value: !Ref LambdaFunctionName
+            Period: 300
+            Stat: Sum
+          ReturnData: false
+
+  # Cost Anomaly Detector
+  CostAnomalyDetector:
+    Type: AWS::CE::AnomalyMonitor
+    Properties:
+      MonitorName: aws-inventory-cost-monitor
+      MonitorType: DIMENSIONAL
+      MonitorDimension: SERVICE
+
+  CostAnomalySubscription:
+    Type: AWS::CE::AnomalySubscription
+    Properties:
+      SubscriptionName: aws-inventory-cost-alerts
+      Threshold: 100  # Alert on anomalies > $100
+      Frequency: DAILY
+      MonitorArnList:
+        - !GetAtt CostAnomalyDetector.Arn
+      Subscribers:
+        - Address: !Ref SNSTopicEmail
+          Type: EMAIL
+          Status: CONFIRMED
+
+Outputs:
+  AlertTopicArn:
+    Description: SNS Topic ARN for alerts
+    Value: !Ref AlertTopic
+    Export:
+      Name: !Sub ${AWS::StackName}-alert-topic

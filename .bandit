@@ -1,0 +1,3 @@
+[bandit]
+exclude: /tests,/venv,/.tox,/build,/dist
+skips: B404,B603

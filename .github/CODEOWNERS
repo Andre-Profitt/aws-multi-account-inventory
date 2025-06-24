@@ -1,0 +1,37 @@
+# Code Owners for AWS Multi-Account Inventory
+
+# Default owners for everything in the repo
+* @yourusername
+
+# Infrastructure and deployment
+/terraform/ @devops-team @yourusername
+/cloudformation/ @devops-team @yourusername
+/scripts/ @devops-team
+
+# Core application code
+/src/ @backend-team @yourusername
+/src/collector/ @backend-team
+/src/query/ @backend-team @data-team
+
+# Lambda handlers
+/src/handler.py @backend-team @devops-team
+
+# Testing
+/tests/ @qa-team @backend-team
+
+# Audit and security
+/audit/ @security-team @devops-team
+/.github/workflows/security-scan.yml @security-team
+/.github/workflows/dependency-check.yml @security-team
+
+# Documentation
+*.md @docs-team @yourusername
+/docs/ @docs-team
+
+# Configuration files
+requirements*.txt @backend-team @security-team
+pyproject.toml @backend-team
+.pre-commit-config.yaml @backend-team @security-team
+
+# GitHub configuration
+/.github/ @devops-team @yourusername

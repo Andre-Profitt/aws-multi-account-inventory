@@ -1,0 +1,21 @@
+# tfsec configuration
+minimum_severity: LOW
+
+# Exclude specific checks
+exclude:
+  - aws-s3-enable-bucket-logging  # Optional for dev buckets
+  - aws-s3-enable-versioning      # Optional for temporary buckets
+
+# Custom check configurations
+custom_checks:
+  - code: CUSTOM-AWS-001
+    description: Ensure all resources have required tags
+    impact: Resource tracking and cost allocation
+    resolution: Add required tags to all resources
+    severity: MEDIUM
+    
+  - code: CUSTOM-AWS-002
+    description: Ensure IAM roles use external ID for cross-account access
+    impact: Security best practice for cross-account access
+    resolution: Add external_id to assume_role_policy
+    severity: HIGH
