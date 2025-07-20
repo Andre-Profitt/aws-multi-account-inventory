@@ -291,14 +291,19 @@ class AWSInventoryCollector:
                 try:
                     location_resp = s3.get_bucket_location(Bucket=bucket_name)
                     bucket_info['region'] = location_resp.get('LocationConstraint') or 'us-east-1'
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(
+                        "Error getting location for bucket %s: %s", bucket_name, e
+                    )
 
                 # Get bucket versioning
                 try:
                     versioning = s3.get_bucket_versioning(Bucket=bucket_name)
                     bucket_info['attributes']['versioning'] = versioning.get('Status', 'Disabled')
-                except Exception:
+                except Exception as e:
+                    logger.warning(
+                        "Error getting versioning for bucket %s: %s", bucket_name, e
+                    )
                     bucket_info['attributes']['versioning'] = 'Unknown'
 
                 # Get bucket encryption
@@ -337,7 +342,10 @@ class AWSInventoryCollector:
                     else:
                         bucket_info['attributes']['size_bytes'] = 0
                         bucket_info['estimated_monthly_cost'] = 0
-                except Exception:
+                except Exception as e:
+                    logger.warning(
+                        "Error getting size metrics for bucket %s: %s", bucket_name, e
+                    )
                     bucket_info['attributes']['size_bytes'] = 0
                     bucket_info['estimated_monthly_cost'] = 0
 
@@ -359,7 +367,10 @@ class AWSInventoryCollector:
                         bucket_info['attributes']['object_count'] = int(count_metrics['Datapoints'][0]['Average'])
                     else:
                         bucket_info['attributes']['object_count'] = 0
-                except Exception:
+                except Exception as e:
+                    logger.warning(
+                        "Error getting object count for bucket %s: %s", bucket_name, e
+                    )
                     bucket_info['attributes']['object_count'] = None
 
                 # Get bucket tags
@@ -381,7 +392,10 @@ class AWSInventoryCollector:
                         for grant in acl.get('Grants', [])
                     )
                     bucket_info['attributes']['public_access'] = public_access
-                except Exception:
+                except Exception as e:
+                    logger.warning(
+                        "Error getting ACL for bucket %s: %s", bucket_name, e
+                    )
                     bucket_info['attributes']['public_access'] = 'Unknown'
 
                 resources.append(bucket_info)
