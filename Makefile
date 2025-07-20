@@ -74,7 +74,7 @@ query-export:
 	python -m src.query.inventory_query --action export --output inventory-export.csv
 
 test:
-	python -m pytest tests/unit/test_enhanced_collector.py -v
+	python -m pytest -v
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +

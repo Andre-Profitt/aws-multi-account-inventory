@@ -548,6 +548,43 @@ class TestInventoryQuery(unittest.TestCase):
         self.assertIn('db-unencrypted', unencrypted_ids)
         self.assertIn('public-bucket', unencrypted_ids)
 
+    @patch('query.inventory_query.boto3.resource')
+    @patch('query.inventory_query.pd.DataFrame.to_csv')
+    def test_export_to_csv(self, mock_to_csv, mock_boto_resource):
+        """Test CSV export helper"""
+        from query.inventory_query import InventoryQuery
+
+        items = [
+            {
+                'resource_type': 'ec2_instance',
+                'resource_id': 'i-123',
+                'account_id': '123456789012',
+                'account_name': 'dev',
+                'region': 'us-east-1',
+                'timestamp': '2023-01-01T00:00:00Z',
+                'estimated_monthly_cost': Decimal('10.00'),
+                'attributes': {
+                    'instance_type': 't3.micro',
+                    'state': 'running',
+                    'tags': {'Name': 'Test'}
+                }
+            }
+        ]
+
+        mock_dynamodb = Mock()
+        mock_table = Mock()
+        mock_dynamodb.Table.return_value = mock_table
+        mock_boto_resource.return_value = mock_dynamodb
+
+        query = InventoryQuery(table_name='test-inventory')
+        query.get_all_resources = Mock(return_value=items)
+
+        query.export_to_csv('out.csv')
+
+        mock_to_csv.assert_called_once()
+        filename = mock_to_csv.call_args.args[0]
+        assert filename == 'out.csv'
+
 
 class TestLambdaHandlers(unittest.TestCase):
     """Unit tests for Lambda handlers"""

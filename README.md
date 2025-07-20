@@ -296,7 +296,11 @@ SNS_TOPIC_ARN=arn:aws:sns:region:account:topic
 REPORT_BUCKET=aws-inventory-reports-account
 MONTHLY_COST_THRESHOLD=10000
 EXTERNAL_ID=inventory-collector
+CONFIG_PATH=/opt/config/accounts.json  # Optional override for collector config
 ```
+
+`CONFIG_PATH` allows you to point the Lambda function to a custom
+`accounts.json` file. If omitted, `/opt/config/accounts.json` is used.
 
 ### Configuration File Structure
 
@@ -900,6 +904,17 @@ pytest
 flake8 src/
 black src/ --check
 ```
+
+### Running Tests
+
+Install the development dependencies first so coverage plugins are available:
+
+```bash
+pip install -r requirements-dev.txt
+make test
+```
+
+`make test` runs the entire unit test suite with coverage enabled.
 
 ### Pull Request Process
 
