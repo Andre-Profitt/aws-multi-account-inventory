@@ -19,7 +19,7 @@ jobs:
     name: CloudFormation Security Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
@@ -64,7 +64,7 @@ jobs:
     name: Terraform Security Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: Run tfsec
         uses: aquasecurity/tfsec-action@v1.0.0
