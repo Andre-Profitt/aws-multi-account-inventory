@@ -12,7 +12,7 @@ jobs:
     name: Vale Style Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: Vale
         uses: errata-ai/vale-action@v2
@@ -26,7 +26,7 @@ jobs:
     name: Markdown Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: markdownlint
         uses: DavidAnson/markdownlint-cli2-action@v9
@@ -38,7 +38,7 @@ jobs:
     name: Broken Link Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: Link Checker
         uses: lycheeverse/lychee-action@v1
@@ -52,7 +52,7 @@ jobs:
     name: Readability Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: Set up Python
         uses: actions/setup-python@v4
